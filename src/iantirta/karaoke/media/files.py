@@ -4,8 +4,13 @@
 from __future__ import annotations
 
 import subprocess
+import typing as t
 from dataclasses import dataclass
 from pathlib import Path
+
+if t.TYPE_CHECKING:
+    from iantirta.karaoke.audio.files import AudioFile
+
 
 __all__ = ["MediaFile"]
 
@@ -18,7 +23,7 @@ class MediaFile:
     Args:
         path: Path to the primary media file.
         source: Original source URL or identifier.
-        audio_path: Optional path to an extracted audio file.
+        audio: AudioFile representation for the media.
         title: Optional media title.
         artist: Optional artist, uploader, or channel name.
         duration: Optional duration in seconds.
@@ -33,36 +38,45 @@ class MediaFile:
     artist: str | None = None
     duration: float | None = None
 
+
     @property
-    def audio_path(self) -> Path:
-        if self.path.suffix == "wav":
-            return self.path
+    def audio(self) -> AudioFile:
+        from iantirta.karaoke.audio import get_audio_info
+
+        if self.path.suffix.lower() == ".wav":
+            return get_audio_info(self.path)
 
         audio_path = self.path.with_suffix(".wav")
 
-        if audio_path.is_file():
-            return audio_path
+        if not audio_path.is_file():
+            self._extract_audio(audio_path)
 
+        return get_audio_info(audio_path)
+
+
+    def _extract_audio(self, output: Path) -> None:
         cmd = [
             "ffmpeg", "-y",
+            "-loglevel", "panic",
             "-i", str(self.path),
             "-vn",
-            "-f", "wav",
-            str(audio_path),
+            str(output),
         ]
-        
-        try:            
+
+        try:
             subprocess.run(
                 cmd,
                 check=True,
                 capture_output=True,
                 text=True,
             )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "ffmpeg was not found. Please install FFmpeg."
+            ) from exc
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 f"Failed to extract audio from {self.path}\n"
                 f"Command: {cmd}\n"
                 f"Error:\n{exc.stderr}"
             ) from exc
-
-        return audio_path
