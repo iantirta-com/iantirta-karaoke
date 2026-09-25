@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
 
 __all__ = ["MediaFile"]
