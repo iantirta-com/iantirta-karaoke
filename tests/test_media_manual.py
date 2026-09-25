@@ -66,12 +66,13 @@ def test_download_media():
     )
 
     print(f"Video: {media.path}")
-    print(f"Audio: {media.audio_path}")
+    print(f"Audio: {media.audio}")
+    print(f"Audio path: {media.audio.path}")
 
     assert media.path.is_file()
 
-    if media.audio_path is not None:
-        assert media.audio_path.is_file()
+    if media.audio.path is not None:
+        assert media.audio.path.is_file()
 
 
 if __name__ == "__main__":
