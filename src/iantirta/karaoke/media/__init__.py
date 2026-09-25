@@ -3,11 +3,19 @@
 
 from .files import MediaFile
 from .lyrics import Lyrics, get_lyrics
-from .youtube import download_audio
+from .youtube import (
+    DownloadOptions,
+    VideoInfo,
+    download_media,
+    extract_info,
+)
 
 __all__ = [
-    "MediaFile",
+    "DownloadOptions",
     "Lyrics",
-    "download_audio",
+    "MediaFile",
+    "VideoInfo",
+    "download_media",
+    "extract_info",
     "get_lyrics",
 ]

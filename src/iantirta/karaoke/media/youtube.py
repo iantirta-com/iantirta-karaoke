@@ -4,17 +4,16 @@
 from __future__ import annotations
 
 import typing as t
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 from .files import MediaFile
 
-
 __all__ = [
-    "VideoInfo",
-    "extract_info",
-    "download_audio",
     "DownloadOptions",
+    "VideoInfo",
+    "download_media",
+    "extract_info",
 ]
 
 
@@ -41,25 +40,26 @@ class VideoInfo:
 
     Args:
         title: Media title.
-        artist: Artist, uploader, or channel name.
+        artist: Artist name.
+        uploader: Uploader or channel name.
         duration: Duration in seconds.
         source: Original media URL.
         thumbnail: Optional thumbnail URL.
     """
 
     title: str
-    artist: str
     duration: float
     source: str
+    uploader: str | None = None
+    artist: str | None = None
     thumbnail: str | None = None
 
 
-def download_audio(
+def download_media(
     url: str,
     output_dir: str | Path,
     *,
     options: DownloadOptions | None = None,
-    cookies: str | Path | None = None,
 ) -> MediaFile:
     """
     Download audio from a media URL.
@@ -70,7 +70,7 @@ def download_audio(
         cookies: Optional path to a cookies file.
 
     Returns:
-        A MediaFile representing the downloaded audio.
+        A MediaFile containing the downloaded video and extracted audio.
 
     Raises:
         ValueError: If `url` is empty.
@@ -92,9 +92,10 @@ def download_audio(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cookiefile: str | None = None
+    download_options = options or DownloadOptions()
 
-    if cookies is not None:
-        cookie_path = Path(cookies).expanduser().resolve()
+    if download_options.cookies is not None:
+        cookie_path = Path(download_options.cookies).expanduser().resolve()
 
         if not cookie_path.is_file():
             raise FileNotFoundError(
@@ -103,41 +104,35 @@ def download_audio(
 
         cookiefile = str(cookie_path)
 
-    options = {
+    yt_options = {
         "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "merge_output_format": "mp4",
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "noplaylist": True,
+
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "continuedl": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "socket_timeout": 30,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            },
-        ],
+
+        "retries": download_options.retries,
+        "fragment_retries": download_options.retries,
+        "socket_timeout": download_options.socket_timeout,
     }
 
     if cookiefile is not None:
-        options["cookiefile"] = cookiefile
+        yt_options["cookiefile"] = cookiefile
 
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
+        with yt_dlp.YoutubeDL(yt_options) as ydl:
             info = ydl.extract_info(url, download=True)
 
-            filepath = Path(ydl.prepare_filename(info))
+            video_path = Path(ydl.prepare_filename(info))
 
-            # FFmpegExtractAudio changes the extension.
-            audio_path = filepath.with_suffix(".wav")
-
-            if not audio_path.is_file():
+            if not video_path.is_file():
                 raise FileNotFoundError(
                     f"Download completed but output file was not found: "
-                    f"{audio_path}"
+                    f"{video_path}"
                 )
 
     except Exception as exc:
@@ -146,14 +141,10 @@ def download_audio(
         ) from exc
 
     return MediaFile(
-        path=audio_path,
+        path=video_path,
         source=url,
         title=info.get("title"),
-        artist=(
-            info.get("artist")
-            or info.get("uploader")
-            or info.get("channel")
-        ),
+        artist=info.get("artist"),
         duration=float(info.get("duration") or 0),
     )
 
@@ -202,9 +193,11 @@ def extract_info(url: str) -> VideoInfo:
         title=info.get("title") or "Unknown",
         artist=(
             info.get("artist")
-            or info.get("uploader")
+            or None
+        ),
+        uploader=(
+            info.get("uploader")
             or info.get("channel")
-            or "Unknown"
         ),
         duration=float(info.get("duration") or 0),
         source=url,
