@@ -5,9 +5,10 @@ import traceback
 from dataclasses import dataclass, field, fields
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from iantirta.media import LyricMetadata
     from iantirta.models.audio_separation import SeparationData
 
 
@@ -58,6 +59,9 @@ class KaraokeTask:
     duration: float | None = None
     thumbnail: str | None = None
 
+    karaoke_type: Literal["basic", "plus"] = "basic"
+
+    _lyric: str | None = None
     _video_path: Path | None = None
     _audio_path: Path | None = None
     _vocal_path: Path | None = None
@@ -217,15 +221,24 @@ class KaraokeTask:
         save_audio(result.instrument, self._instrument_path, samplerate=result.samplerate)
 
     @property
-    def lyrics(self):
-        if self._lyrics is None:
-            pass
+    def lyric(self):
+        if self._lyric is None:
+            if not self.title or not self.artist or not self.duration:
+                self._download_video()
 
-        return self._lyrics
+            from iantirta.media import get_lyric
 
-    @lyrics.setter
-    def lyrics(self, value: str):
-        self._lyrics = value
+            lyric_metadata: LyricMetadata = get_lyric(self.title, self.artist, self.duration)
+
+            self.title = lyric_metadata.trackName
+            self.artist = lyric_metadata.artistName
+            self._lyric = lyric_metadata.plainLyrics
+            
+        return self._lyric
+
+    @lyric.setter
+    def lyric(self, value: str):
+        self._lyric = value
 
 
 if __name__ == "__main__":
@@ -243,12 +256,13 @@ if __name__ == "__main__":
     }
     task = KaraokeTask.from_dict(**data)
     pprint(task)
-    # pprint(task.vocal_path)
+    pprint(task.lyric)
+    pprint(task)
 
-    import numpy as np
-    dummy_tensor = np.zeros((2, 44100), dtype=np.float32)
-    from iantirta.models.models.demucs.hdemucs import HDemucs
-    model = HDemucs(channels=4, sources=["drums", "bass", "other", "vocals"])
-    from iantirta.models.audio_separation import AudioSeparation
-    separator = AudioSeparation(model, logger=_logger)
-    task._separate_vocal_and_instrument(separator)
+    # import numpy as np
+    # dummy_tensor = np.zeros((2, 44100), dtype=np.float32)
+    # from iantirta.models.models.demucs.hdemucs import HDemucs
+    # model = HDemucs(channels=4, sources=["drums", "bass", "other", "vocals"])
+    # from iantirta.models.audio_separation import AudioSeparation
+    # separator = AudioSeparation(model, logger=_logger)
+    # task._separate_vocal_and_instrument(separator)
