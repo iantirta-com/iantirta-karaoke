@@ -39,9 +39,6 @@ class BatchKaraoke:
                 future = dl_pool.submit(task.get_audio_path)
                 active_futures[future] = ("download", task)
 
-            future_downloads = {dl_pool.submit(t.get_audio_path): t for t in self.karaoke_tasks}
-            future_separations = {}
-
             while active_futures:
                 done, not_done = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
                 
