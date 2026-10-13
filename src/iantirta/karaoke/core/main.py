@@ -1,11 +1,50 @@
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, field
 from pathlib import Path
 import logging
+from functools import wraps
+import time
+import traceback
 
 _logger = logging.getLogger(__name__)
 
+log_levels = {
+    "stats": logging.DEBUG,
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+    "critical": logging.CRITICAL,
+}
+
+def report_perf(cls):
+    for name, attr in cls.__dict__.items():
+        if name.startswith(("__", "log", "error",)):
+            continue
+
+        if isinstance(attr, property):
+            pass
+        elif isinstance(attr, staticmethod):
+            pass
+        elif callable(attr):
+            @wraps(attr)
+            def wrapper(self, *args, __fn=attr, __name=name, **kwargs):
+                t0 = time.perf_counter()
+                error = False
+                try:
+                    return __fn(self, *args, **kwargs)
+                except Exception as e:
+                    self.error(__name, e)
+                    error = True
+                    raise
+                finally:
+                    if not error:
+                        self.log("info", f"[{__name}] resolved within: ({time.perf_counter() - t0:.4f}s)")
+            setattr(cls, name, wrapper)
+    return cls
+
 @dataclass
+@report_perf
 class KaraokeTask:
     id: int
 
@@ -21,13 +60,29 @@ class KaraokeTask:
     _vocal_path: Path | None = None
     _instrument_path : Path | None = None
 
-    error: str | None = None
+    _error_entries: list[tuple] = field(default_factory=list)
+    _log_entries: list[tuple] = field(default_factory=list)
+    logger: logging.Logger | None = None
 
-    logger = _logger
+    def __post_init__(self):
+        if not self.logger:
+            self.logger = logging.getLogger(f"iantirta.karaoke.Task({self.id!s})")
+    
+    def log(self, loglevel, message, *args, **kwargs) -> None:
+        self._log_entries.append((loglevel, message, args, kwargs))
+        if loglevel in log_levels:
+            self.logger.log(log_levels[loglevel], message, *args, **kwargs)
+
+    def error(self, fn_name: str, error: Exception) -> None:
+        err_msg = str(error)
+        tb_str = traceback.format_exc()
+        
+        self._error_entries.append((fn_name, type(error), err_msg, tb_str))
+        self.log("error", f"[{fn_name}] {err_msg}")
 
     @classmethod
     def from_dict(cls, **datas) -> "KaraokeTask":
-        valid_keys = [f.name for f in fields(cls)]
+        valid_keys = {f.name for f in fields(cls)}
         valid_datas = {k: v for k, v in datas.items() if k in valid_keys}
         
         return cls(**valid_datas)
@@ -50,7 +105,7 @@ class KaraokeTask:
     def video_path(self, value: str | Path):
         # Little bit of validation
         if not Path(value).is_file():
-            self.error = "File Not Exist."
+            raise FileNotFoundError(f"File Not Exist: {value}")
 
         else:
             self._video_path = Path(value)
@@ -60,8 +115,7 @@ class KaraokeTask:
         try:
             metadata: VideoMetadata = VideoDownloader().download(self.source)
         except Exception as e:
-            self.error = f"Error while downloading video:\n{e}"
-            return
+            raise
 
         self.video_path = metadata.video_path
 
@@ -107,7 +161,8 @@ class KaraokeTask:
     @audio_path.setter
     def audio_path(self, value: str | Path):
         if not Path(value).is_file():
-            self.error = "Audio file not exist"
+            raise FileNotFoundError(f"Audio File Not Exist: {value}")
+
         else:
             self._audio_path = Path(value)
 
@@ -122,30 +177,33 @@ class KaraokeTask:
             if not self._vocal_path.is_file():
                 try:
                     self._separate_vocal_and_instrument()
+
                 except Exception as e:
-                    self.error = f"Error while separating: {e}"
+                    raise
+
                 else:
                     if not self._vocal_path.is_file():
-                        self.error = "Separating return success but vocal path doesnt exists."
-    
+                        raise OSError("Separating return success but vocal path doesnt exists.")
+
         return self._vocal_path
 
     @vocal_path.setter
     def vocal_path(self, value: str | Path):
         if not Path(value).is_file():
-            self.error = "Vocal path doesnt exist."
+            raise FileNotFoundError(f"Vocal File Not Exist: {value}")
+
         else:
             self._vocal_path = Path(value)
 
     def _separate_vocal_and_instrument(self, separator=None):
         if separator is None:
-            from iantirta.models import load_model
-            separator = load_model("adefossez/Demucs-mdx_extra_q")
+            from iantirta.models.load_model import load_model
+            separator = load_model("adefossez/Demucs-mdx_extra_q", "separation")
 
         try:
-            result: SeparationData = separator.separate(self.audio_path)
+            result: SeparationData = separator.separate(self.audio_path, )
         except Exception:
-            self.error = "..."
+            raise
 
         from iantirta.audio import save_audio
         save_audio(result.vocal, self._vocal_path)
@@ -166,6 +224,10 @@ class KaraokeTask:
 if __name__ == "__main__":
     from rich import inspect
     from pprint import pprint
+    from iantirta.telemetry.netsvc import setup_logger
+    
+    setup_logger("iantirta")
+    
     url = "https://youtube.com/watch?v=sdnDInjdWjw&list=RDsdnDInjdWjw&start_radio=1&pp=ygUIQmVybmFkeWGgBwE%3D"
     data = {
         "id": 1,
@@ -173,3 +235,4 @@ if __name__ == "__main__":
     }
     task = KaraokeTask.from_dict(**data)
     inspect(task)
+    print(task.vocal_path)
