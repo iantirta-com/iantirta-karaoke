@@ -42,7 +42,9 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
-dependencies = []
+dependencies = [
+    "yt-dlp"
+]
 
 
 [project.optional-dependencies]
