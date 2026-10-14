@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -94,12 +95,43 @@ class BatchKaraoke:
         for child in children:
             _logger.info('A child process was found, pid is %s, process may hang', child)
 
+    def _clean(self):
+        import gc
+
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        gc.collect()
+
+    def cleanup_task(self):
+        for task in self._karaoke_tasks:
+            for path in [
+                task.karaoke_path,
+                task.video_path,
+                task.instrument_path,
+                task.audio_path,
+            ]:
+                if path is not None:
+                    Path(path).unlink(missing_ok=True,)
 
     def run(self) -> None:
         
         install_deno()
 
-        separator = load_model("adefossez/Demucs-mdx_extra_q", "separation")
+        separator = load_model(
+            "adefossez/Demucs-mdx_extra_q",
+            "separation",
+            model_type_options={
+                "shifts": 1,
+                "overlap": 0.75,
+                "split": True,
+                "segment": 200,
+                "jobs" : 0,
+                "logger" : self.logger,
+            }
+        )
 
         dl_pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="DLPool")
         sep_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SepPool")
@@ -111,9 +143,11 @@ class BatchKaraoke:
             future = dl_pool.submit(task.get_audio_path)
             active_futures[future] = ("download", task)
 
+        task: KaraokeTask
+        karaoke_plus_tasks: list[KaraokeTask] = []
         try:
             while active_futures:
-                done, not_done = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+                done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
                 
                 for future in done:
                     task_type, task = active_futures.pop(future)
@@ -122,30 +156,36 @@ class BatchKaraoke:
                         res = future.result()
                         
                         if task_type == "download":
-                            self.logger.info(f"[{task.id}] Download complete: {res}")
+                            self.logger.info(f"Task [{task.id}] Download complete: {res}")
                             
                             if len(task._error_entries) == 0:
+                                if task.karaoke_type == "plus":
+                                    task.get_lyric()
+
                                 sep_future = sep_pool.submit(task._separate_vocal_and_instrument, separator)
                                 active_futures[sep_future] = ("separate", task)
                                 
                         elif task_type == "separate":
-                            self.logger.info(f"[{task.id}] Separation complete: {res}")
+                            self.logger.info(f"Task [{task.id}] Separation complete: {res}")
                             
                             if len(task._error_entries) == 0 and getattr(task, "karaoke_type", "") == "basic":
-                                # RENDER HERE! 
-                                self.logger.info(f"[{task.id}] Rendering now...")
+                                self.logger.info(f"Task [{task.id}] Rendering now...")
                                 render_future = render_pool.submit(task._render_karaoke)
                                 active_futures[render_future] = ("render", task)
-                            else:
+
+                            elif (task._error_entries) == 0:
                                 # Handle other types
-                                pass
+                                karaoke_plus_tasks.append(task)
 
                         elif task_type == "render":
-                            # Post result
-                            pass
+                            self.logger.info(f"Task [{task.id}] Render succesful.")
+                            if self.render_hook is not None:
+                                self.render_hook(task)
                                 
                     except Exception as e:
-                        self.logger.error(f"[{task.id}] Error during {task_type}: {e}")
+                        self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
+                        if self.error_hook is not None:
+                            self.error_hook(task)
 
         except KeyboardInterrupt:
             self.logger.warning("[!] Ctrl+C detected! Initiating graceful shutdown...")
@@ -160,7 +200,95 @@ class BatchKaraoke:
             render_pool.shutdown(wait=True, cancel_futures=True)
 
         finally:
-            self.shutdown()
+            try:
+                del separator.model, separator
+            except:
+                pass
+    
+            self._clean()
+            dl_pool.shutdown()
+            sep_pool.shutdown()
+        
+        # Detect Audio
+        for task in karaoke_plus_tasks:
+            if len(task._error_entries) == 0:
+                try:
+                    task.detect_audio_activity()
+                except Exception:
+                    if self.error_hook is not None:
+                        self.error_hook(task)
+
+        # Transcribe
+        transcriber = None
+        for task in karaoke_plus_tasks:
+            if len(task._error_entries) == 0:
+                if not transcriber:
+                    pass
+                try:
+                    task.transcribe(transcriber)
+                except Exception:
+                    if self.error_hook is not None:
+                        self.error_hook(task)
+        try:
+            del transcriber.model, transcriber
+        except:
+            pass
+        self._clean()
+
+        # Lyric Align
+        for task in karaoke_plus_tasks:
+            if len(task._error_entries) == 0:
+                try:
+                    task.lyric_align()
+                except Exception:
+                    if self.error_hook is not None:
+                        self.error_hook(task)
+
+        # Force Align
+        aligner = None
+        for task in karaoke_plus_tasks:
+            if len(task._error_entries) == 0:
+                if not aligner:
+                    pass
+                try:
+                    task.force_align(aligner)
+
+                    if len(task._error_entries) == 0:
+                        render_future = render_pool.submit(task._render_karaoke)
+                        active_futures[render_future] = ("render", task)
+
+                except Exception:
+                    if self.error_hook is not None:
+                        self.error_hook(task)
+        try:
+            del aligner.model, aligner.processor, aligner
+        except:
+            pass
+        self._clean()
+
+        while active_futures:
+            done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+            
+            for future in done:
+                task_type, task = active_futures.pop(future)
+
+                try:
+                    res = future.result()
+                    assert task_type == "render"
+
+                    self.logger.info(f"Task [{task.id}] Render succesful.")
+                    if self.render_hook is not None:
+                        self.render_hook(task)
+
+                except Exception as e:
+                    self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
+                    if self.error_hook is not None:
+                        self.error_hook(task)
+
+        render_pool.shutdown()
+        self.cleanup_task()
+
+        self.shutdown()
 
 
 if __name__ == "__main__":

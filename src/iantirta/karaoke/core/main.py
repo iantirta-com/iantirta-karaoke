@@ -246,19 +246,28 @@ class KaraokeTask:
         save_audio(result.vocal, self._vocal_path, samplerate=result.samplerate)
         save_audio(result.instrument, self._instrument_path, samplerate=result.samplerate)
 
+
+    def get_lyric(self):
+        if not self.title or not self.artist or not self.duration:
+            self._download_video()
+
+        from iantirta.media import get_lyric
+
+        lyric_metadata: LyricMetadata = get_lyric(self.title, self.artist, self.duration)
+
+        self.title = lyric_metadata.trackName
+        self.artist = lyric_metadata.artistName
+        self._lyric = lyric_metadata.plainLyrics
+
+        return self._lyric
+
     @property
     def lyric(self):
         if self._lyric is None:
             if not self.title or not self.artist or not self.duration:
                 self._download_video()
 
-            from iantirta.media import get_lyric
-
-            lyric_metadata: LyricMetadata = get_lyric(self.title, self.artist, self.duration)
-
-            self.title = lyric_metadata.trackName
-            self.artist = lyric_metadata.artistName
-            self._lyric = lyric_metadata.plainLyrics
+            self._lyric = self.get_lyric(self.title, self.artist, self.duration)
             
         return self._lyric
 

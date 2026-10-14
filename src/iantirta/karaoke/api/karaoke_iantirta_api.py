@@ -1,0 +1,65 @@
+
+from iantirta.media import BaseHTTP
+import requests
+
+class IantirtaAPI(BaseHTTP):
+    endpoint = "https://karaoke.iantirta.com"
+
+    def __init__(
+        self,
+        api_url: str,
+        api_token: str,
+        worker_id: int,
+        *args, **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+    
+        if api_url is not None:
+            self.endpoint = api_url
+
+        self.worker_id = worker_id
+        self.access_token = api_token
+
+    def _make_payload(self, params):
+        payload = {
+            "worker_id": self.worker_id,
+            "access_token": self.access_token,
+        }
+        payload.update(params)
+        return {"params": payload}
+
+    def raise_for_status(self, res):
+        try:
+            res.raise_for_status()
+        except Exception:
+            raise
+
+        res = res.json()
+        if error := res.get("error"):
+            error_data = error.get("data", {})
+            raise OSError(
+                f"\nIantirta API Error ({error.get('code')}) {error.get('message')}:\n"
+                f"ErrorType: {error_data.get('name')}\n"
+                f"Message: {error_data.get('message')}\n"
+                f"Traceback: {error_data.get('debug')}"
+            )
+
+    def make_json_request(self, path: str, params: dict):
+        payload = {
+            "worker_id": self.worker_id,
+            "access_token": self.access_token,
+        }
+        payload.update(params)
+
+        res = self.request('get', path, json={"params": payload}, headers={"Content-Type": "application/json"})
+        self.raise_for_status(res)
+
+        return res.json()['result']
+
+
+if __name__ == "__main__":
+    api = IantirtaAPI(
+        1,
+        "fb1b8a4dafbe1b197b5e2f2a9e38f68e132aed3af691fca1a5f2314ea892d38c"
+    )
+    print(api.claim_task_legacy())
