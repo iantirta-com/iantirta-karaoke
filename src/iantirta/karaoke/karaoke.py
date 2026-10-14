@@ -10,9 +10,11 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
 import psutil
+from iantirta.media import install_deno
 from iantirta.models.load_model import load_model
 
 from iantirta.karaoke.core.main import KaraokeTask
+from iantirta.karaoke.rendering_utils import Renderer
 
 _logger = logging.getLogger(__name__)
 
@@ -30,6 +32,9 @@ class BatchKaraoke:
             KaraokeTask.from_dict(**task)
             for task in tasks
         ]
+
+        Renderer.ensure_font_exists()
+
         self.render_hook = render_hook
         self.error_hook = error_hook
         
@@ -49,7 +54,6 @@ class BatchKaraoke:
             win32api.SetConsoleCtrlHandler(lambda sig: self.signal_handler(sig, None), 1)
 
     def signal_handler(self, sig, frame):
-        print("SIGNAL RECEIVED =", sig)
         if sig in [signal.SIGINT, signal.SIGTERM]:
             # shutdown on kill -INT or -TERM
             self.quit_signals_received += 1
@@ -92,6 +96,8 @@ class BatchKaraoke:
 
 
     def run(self) -> None:
+        
+        install_deno()
 
         separator = load_model("adefossez/Demucs-mdx_extra_q", "separation")
 
@@ -156,13 +162,6 @@ class BatchKaraoke:
         finally:
             self.shutdown()
 
-        # finally:
-        #     # 5. Cancel all pending futures so they don't start
-        #     if self._shutdown_event.is_set():
-        #         self.logger.info("Cleaning up remaining tasks...")
-        #         for future in active_futures.keys():
-        #             future.cancel()
-        #         self.logger.info("Waiting for currently running tasks to finish...")
 
 if __name__ == "__main__":
     from iantirta.telemetry import netsvc
