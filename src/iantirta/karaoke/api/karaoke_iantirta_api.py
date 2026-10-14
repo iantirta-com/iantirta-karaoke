@@ -1,6 +1,7 @@
 
 from iantirta.media import BaseHTTP
 
+
 class IantirtaAPI(BaseHTTP):
     endpoint = "https://karaoke.iantirta.com"
 
