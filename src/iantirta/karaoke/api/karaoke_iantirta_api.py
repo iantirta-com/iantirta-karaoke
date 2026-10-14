@@ -1,6 +1,5 @@
 
 from iantirta.media import BaseHTTP
-import requests
 
 class IantirtaAPI(BaseHTTP):
     endpoint = "https://karaoke.iantirta.com"
@@ -56,10 +55,3 @@ class IantirtaAPI(BaseHTTP):
 
         return res.json()['result']
 
-
-if __name__ == "__main__":
-    api = IantirtaAPI(
-        1,
-        "fb1b8a4dafbe1b197b5e2f2a9e38f68e132aed3af691fca1a5f2314ea892d38c"
-    )
-    print(api.claim_task_legacy())
