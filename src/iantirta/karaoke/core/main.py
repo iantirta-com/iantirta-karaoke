@@ -49,6 +49,7 @@ def report_perf(cls):
             setattr(cls, name, wrapper)
     return cls
 
+
 @dataclass
 @report_perf
 class KaraokeTask:
@@ -64,6 +65,7 @@ class KaraokeTask:
     karaoke_type: Literal["basic", "plus"] = "basic"
 
     _lyric: str | None = None
+
     _video_path: Path | None = None
     _audio_path: Path | None = None
     _vocal_path: Path | None = None
@@ -79,7 +81,7 @@ class KaraokeTask:
             self.logger = logging.getLogger(f"iantirta.karaoke.Task({self.id!s})")
             self.logger.setLevel(logging.DEBUG)
 
-        netsvc.add_hook(self.store_log_entries)
+        self.logger.add_hook(self.store_log_entries)
 
     def store_log_entries(self, record) -> None:
         root_handler = logging.getLogger().handlers[0]
@@ -100,9 +102,10 @@ class KaraokeTask:
         
         return cls(**valid_datas)
 
+    # Specific Karaoke path
     @property
     def video_path(self) -> Path:
-        if self._video_path is None:
+        if self._video_path is None and len(self._error_entries) == 0:
             if self.source.startswith(("http://", "https://")):
                 self._download_video()
 
@@ -124,7 +127,6 @@ class KaraokeTask:
             self._video_path = Path(value)
 
     def _download_video(self):
-        self.logger.debug(f"downloading started: {self.source}")
         from iantirta.media import VideoDownloader, VideoMetadata
 
         metadata: VideoMetadata = VideoDownloader().download(self.source, logger=self.logger)
@@ -155,20 +157,6 @@ class KaraokeTask:
         if self._audio_path is None or not self._audio_path.is_file():
             self._audio_path = self.video_path.with_suffix(".wav")
 
-            if not self._audio_path.is_file():
-                import subprocess
-                try:
-                    subprocess.run([
-                        "ffmpeg", "-y",
-                        "-i", str(self._video_path),
-                        "-vn", str(self._audio_path)
-                    ], check=True, capture_output=True, text=True,)
-                except Exception:
-                    raise
-
-                if not self._audio_path.is_file():
-                    raise OSError("Audio Normalization failed.")
-
         return self._audio_path
 
     @audio_path.setter
@@ -179,73 +167,25 @@ class KaraokeTask:
         else:
             self._audio_path = Path(value)
 
-    def get_audio_path(self) -> Path:
+    def get_audio_path(self, *, lyric: bool = False) -> Path:
+        if lyric:
+            self.get_lyric()
+
+        if not self.audio_path.is_file():
+            import subprocess
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y",
+                    "-i", str(self.video_path),
+                    "-vn", str(self.audio_path)
+                ], check=True, capture_output=True, text=True,)
+            except Exception:
+                raise
+
+            if not self.audio_path.is_file():
+                raise OSError("Audio Normalization failed.")
+
         return self.audio_path
-
-    @property
-    def vocal_path(self):
-        if self._vocal_path is None or not self._vocal_path.is_file():
-            self._vocal_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
-
-            if not self._vocal_path.is_file():
-                self._separate_vocal_and_instrument()
-
-                if not self._vocal_path.is_file():
-                    raise OSError("Separating return success but vocal path doesnt exists.")
-
-        return self._vocal_path
-
-    @vocal_path.setter
-    def vocal_path(self, value: str | Path):
-        if not Path(value).is_file():
-            raise FileNotFoundError(f"Vocal File Not Exist: {value}")
-
-        else:
-            self._vocal_path = Path(value)
-
-    @property
-    def instrument_path(self):
-        if self._instrument_path is None or not self._instrument_path.is_file():
-            self._instrument_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
-
-            if not self._instrument_path.is_file():
-                self._separate_vocal_and_instrument()
-
-                if not self._instrument_path.is_file():
-                    raise OSError("Separating return success but vocal path doesnt exists.")
-
-        return self._instrument_path
-
-    @instrument_path.setter
-    def instrument_path(self, value: str | Path):
-        if not Path(value).is_file():
-            raise FileNotFoundError(f"Instrument File Not Exist: {value}")
-
-        else:
-            self._instrument_path = Path(value)
-
-    def _separate_vocal_and_instrument(self, separator=None):
-        if self._vocal_path is None:
-            self._vocal_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
-            
-        if self._instrument_path is None:
-            self._instrument_path = self.audio_path.with_name(self.audio_path.stem + "_instrument.wav")
-
-        if self._vocal_path.is_file() and self._instrument_path.is_file():
-            self.logger.debug(f'Already separated. vocal="{self._vocal_path}", instrument="{self._instrument_path}"')
-            return
-
-        from iantirta.audio import save_audio
-
-        if separator is None:
-            self.logger.debug('separator is not being passed, loading ourself')
-            from iantirta.models.load_model import load_model
-            separator = load_model("adefossez/Demucs-mdx_extra_q", "separation")
-
-        result: SeparationData = separator.separate(self.audio_path, logger=self.logger)
-        save_audio(result.vocal, self._vocal_path, samplerate=result.samplerate)
-        save_audio(result.instrument, self._instrument_path, samplerate=result.samplerate)
-
 
     def get_lyric(self):
         if not self.title or not self.artist or not self.duration:
@@ -264,10 +204,7 @@ class KaraokeTask:
     @property
     def lyric(self):
         if self._lyric is None:
-            if not self.title or not self.artist or not self.duration:
-                self._download_video()
-
-            self._lyric = self.get_lyric(self.title, self.artist, self.duration)
+            self._lyric = self.get_lyric()
             
         return self._lyric
 
@@ -275,28 +212,108 @@ class KaraokeTask:
     def lyric(self, value: str):
         self._lyric = value
 
+    # Now this will need to be explicitly call for each getter method
+    @property
+    def vocal_path(self):
+        if self._vocal_path is None:
+            self._vocal_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
+
+        return self._vocal_path
+
+    @vocal_path.setter
+    def vocal_path(self, value: str | Path):
+        if not Path(value).is_file():
+            raise FileNotFoundError(f"Vocal File Not Exist: {value}")
+
+        else:
+            self._vocal_path = Path(value)
+
+    @property
+    def instrument_path(self):
+        if self._instrument_path is None:
+            self._instrument_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
+
+        return self._instrument_path
+
+    @instrument_path.setter
+    def instrument_path(self, value: str | Path):
+        if not Path(value).is_file():
+            raise FileNotFoundError(f"Instrument File Not Exist: {value}")
+
+        else:
+            self._instrument_path = Path(value)
+
+    def _separate_vocal_and_instrument(self, separator):
+        if self._vocal_path is None:
+            self._vocal_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
+            
+        if self._instrument_path is None:
+            self._instrument_path = self.audio_path.with_name(self.audio_path.stem + "_instrument.wav")
+
+        if self._vocal_path.is_file() and self._instrument_path.is_file():
+            self.logger.debug(f'Already separated. vocal="{self._vocal_path}", instrument="{self._instrument_path}"')
+            return
+
+        from iantirta.audio import save_audio
+
+        if separator is None:
+            self.logger.debug('separator is not being passed,')
+            raise OSError()
+
+        result: SeparationData = separator.separate(self.audio_path, logger=self.logger)
+        save_audio(result.vocal, self._vocal_path, samplerate=result.samplerate)
+        save_audio(result.instrument, self._instrument_path, samplerate=result.samplerate)
+
+        return self.vocal_path, self.instrument_path
+
+    def _detect_audio_activity(self):
+        pass
+
+    def _align_lyric(self):
+        pass
+
+    def _align_force(self, aligner):
+        pass
+
+    @property
+    def ass_content(self):
+        return None
+    
     @property
     def karaoke_path(self):
-        if self._karaoke_path is None or not self._karaoke_path.is_file():
-            self._karaoke_path = self.video_path.with_name(f"{self.artist} - {self.title}.mkv")
-
-            if not self._karaoke_path.is_file():
-                self._render_karaoke()
-
-                if not self._karaoke_path.is_file():
-                    raise OSError("Rendering return success but karaoke path doesnt exists.")
-            
-        return self._karaoke_path
-
-    def _render_karaoke(self):
-        from ..rendering_utils import Renderer
-        
         if self._karaoke_path is None:
             self._karaoke_path = self.video_path.with_name(f"{self.artist} - {self.title}.mkv")
+
+        return self._karaoke_path
+
+    @karaoke_path.setter
+    def karaoke_path(self, value: str | Path):
+        if not Path(value).is_file():
+            raise FileNotFoundError(f"Instrument File Not Exist: {value}")
+
+        else:
+            self._karaoke_path = Path(value)
+
+    def _render_karaoke(self):
+        if self.karaoke_type == 'plus' and not self.ass_content:
+            raise OSError("Karaoke plus needed ass_content to be rendered.")
+
+        if not self.instrument_path.is_file():
+            raise OSError("Cant do rendering when instrument_path is not a file, surely you wanted to do separation first.")
+
+        from ..rendering_utils import Renderer
         
         audio_paths = [self.instrument_path]
-        return Renderer().render(self.video_path, audio_paths, self.duration, self._karaoke_path)
+        self.karaoke_path = Renderer().render(
+            self.video_path,
+            audio_paths,
+            self.duration,
+            self.karaoke_path,
+            ass_content=self.ass_content,
+            logger=self.logger
+        )
 
+        return self.karaoke_path
 
 if __name__ == "__main__":
     from pprint import pprint
@@ -319,6 +336,7 @@ if __name__ == "__main__":
         "id": 1,
         "source": url
     }
+    from dataclasses import asdict
     task = KaraokeTask.from_dict(**data)
     pprint(task)
     pprint(task.lyric)
@@ -326,6 +344,8 @@ if __name__ == "__main__":
     print("="*50)
     for entry in task._log_entries:
         print(entry)
+    print("="*50)
+    print(asdict(task))
     # import numpy as np
     # dummy_tensor = np.zeros((2, 44100), dtype=np.float32)
     # from iantirta.models.models.demucs.hdemucs import HDemucs

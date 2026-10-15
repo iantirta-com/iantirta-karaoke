@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ALL_COMPLETED, FIRST_COMPLETED, ThreadPoolExecutor, wait, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,10 @@ class BatchKaraoke:
     def karaoke_tasks(self) -> list[KaraokeTask]:
         return [task for task in self._karaoke_tasks if len(task._error_entries) == 0]
 
+    @property
+    def karaoke_plus_tasks(self) -> list[KaraokeTask]:
+        return [task for task in self.karaoke_tasks if task.karaoke_type == 'plus']
+
     def shutdown(self):
         """Programmatically signal the batch process to stop."""
         self.logger.warning("Shutdown signal received. cleaning up thread...")
@@ -95,7 +99,7 @@ class BatchKaraoke:
         for child in children:
             _logger.info('A child process was found, pid is %s, process may hang', child)
 
-    def _clean(self):
+    def clear_memory(self):
         import gc
 
         import torch
@@ -104,204 +108,249 @@ class BatchKaraoke:
             torch.cuda.empty_cache()
 
         gc.collect()
-
-    def cleanup_task(self):
+        
+    def cleanup_tasks_files(self):
         for task in self._karaoke_tasks:
-            for path in [
-                task.karaoke_path,
-                task.video_path,
-                task.instrument_path,
-                task.audio_path,
-            ]:
-                if path is not None:
-                    Path(path).unlink(missing_ok=True,)
+            try:
+                for path in [
+                    task.karaoke_path,
+                    task.instrument_path, task.vocal_path,
+                    task.audio_path, task.video_path
+                ]:
+                    if path is not None:
+                        path.unlink(missing_ok=True,)
+            except:
+                continue
 
     def run(self) -> None:
-        
+
         install_deno()
 
-        separator = load_model(
-            "adefossez/Demucs-mdx_extra_q",
-            "separation",
-            model_type_options={
-                "shifts": 1,
-                "overlap": 0.75,
-                "split": True,
-                "segment": 200,
-                "jobs" : 0,
-                "logger" : self.logger,
-            }
-        )
-
-        dl_pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="DLPool")
-        sep_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SepPool")
-        render_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RenderPool")
-        
-        active_futures = {}
-    
-        for task in self.karaoke_tasks:
-            future = dl_pool.submit(task.get_audio_path)
-            active_futures[future] = ("download", task)
-
-        task: KaraokeTask
-        karaoke_plus_tasks: list[KaraokeTask] = []
-        try:
-            while active_futures:
-                done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
-                
-                for future in done:
-                    task_type, task = active_futures.pop(future)
-                    
-                    try:
-                        res = future.result()
-                        
-                        if task_type == "download":
-                            self.logger.info(f"Task [{task.id}] Download complete: {res}")
-                            
-                            if len(task._error_entries) == 0:
-                                if task.karaoke_type == "plus":
-                                    task.get_lyric()
-
-                                sep_future = sep_pool.submit(task._separate_vocal_and_instrument, separator)
-                                active_futures[sep_future] = ("separate", task)
-                                
-                        elif task_type == "separate":
-                            self.logger.info(f"Task [{task.id}] Separation complete: {res}")
-                            
-                            if len(task._error_entries) == 0 and getattr(task, "karaoke_type", "") == "basic":
-                                self.logger.info(f"Task [{task.id}] Rendering now...")
-                                render_future = render_pool.submit(task._render_karaoke)
-                                active_futures[render_future] = ("render", task)
-
-                            elif (task._error_entries) == 0:
-                                # Handle other types
-                                karaoke_plus_tasks.append(task)
-
-                        elif task_type == "render":
-                            self.logger.info(f"Task [{task.id}] Render succesful.")
-                            if self.render_hook is not None:
-                                self.render_hook(task)
-                                
-                    except Exception as e:
-                        self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
-                        if self.error_hook is not None:
-                            self.error_hook(task)
-
-        except KeyboardInterrupt:
-            self.logger.warning("[!] Ctrl+C detected! Initiating graceful shutdown...")
-
-            for future in active_futures.keys():
-                self.logger.warning(f"canceling future of {future}")
-                future.cancel()
-            active_futures.clear()
-
-            dl_pool.shutdown(wait=True, cancel_futures=True)
-            sep_pool.shutdown(wait=True, cancel_futures=True)
-            render_pool.shutdown(wait=True, cancel_futures=True)
-
-        finally:
-            try:
-                del separator.model, separator
-            except:
-                pass
-    
-            self._clean()
-            dl_pool.shutdown()
-            sep_pool.shutdown()
-        
-        # Detect Audio
-        for task in karaoke_plus_tasks:
-            if len(task._error_entries) == 0:
-                try:
-                    task.detect_audio_activity()
-                except Exception:
-                    if self.error_hook is not None:
-                        self.error_hook(task)
-
-        # Transcribe
+        separator = None
         transcriber = None
-        for task in karaoke_plus_tasks:
-            if len(task._error_entries) == 0:
-                if not transcriber:
-                    pass
-                try:
-                    task.transcribe(transcriber)
-                except Exception:
-                    if self.error_hook is not None:
-                        self.error_hook(task)
-        try:
-            del transcriber.model, transcriber
-        except:
-            pass
-        self._clean()
-
-        # Lyric Align
-        for task in karaoke_plus_tasks:
-            if len(task._error_entries) == 0:
-                try:
-                    task.lyric_align()
-                except Exception:
-                    if self.error_hook is not None:
-                        self.error_hook(task)
-
-        # Force Align
         aligner = None
-        for task in karaoke_plus_tasks:
-            if len(task._error_entries) == 0:
-                if not aligner:
+
+        with (
+            ThreadPoolExecutor(max_workers=5, thread_name_prefix="NetPool") as network_pool,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="GpuPool") as gpu_pool,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="CpuPool") as cpu_pool
+        ):
+            try:
+                active_futures = {
+                    network_pool.submit(task.get_audio_path, lyric=task.karaoke_type=='plus')
+                    : ('download', task)
+                    for task in self.karaoke_tasks
+                }
+
+                while active_futures:
+                    done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+
+                    for future in done:
+                        task_type, task = active_futures.pop(future)
+
+                        try:
+                            res = future.result()
+
+                            if len(task._error_entries) == 0:
+                    
+                                if task_type == "download":
+                                    self.logger.info(f"Task [{task.id}] Download complete: {res}")
+
+                                    if separator is not None:
+                                        separator = load_model(
+                                            "adefossez/Demucs-mdx_extra_q",
+                                            "separation",
+                                            model_type_options={
+                                                "shifts": 1,
+                                                "overlap": 0.75,
+                                                "split": True,
+                                                "segment": 200,
+                                                "jobs" : 0,
+                                                "logger" : self.logger,
+                                            }
+                                        )
+                                    #sep_future = gpu_pool.submit(task._separate_vocal_and_instrument, separator)
+                                    sep_future = gpu_pool.submit(print, f"{task.id} mock separate")
+                                    active_futures[sep_future] = ("separate", task)
+
+                                elif task_type == "separate":
+                                    self.logger.info(f"Task [{task.id}] Separation complete: {res}")
+
+                                    if task.karaoke_type == 'basic':
+                                        render_future = cpu_pool.submit(task._render_karaoke)
+                                        active_futures[render_future] = ("render", task)
+
+                                elif task_type == "render":
+                                    assert task.karaoke_type == "basic"
+                                    self.logger.info(f"Task [{task.id}] Render succesful.")
+                                    if self.render_hook is not None:
+                                        self.render_hook(task)
+
+                            else:
+                                raise OSError("Task have error therefore cannot continue.")
+
+                        except Exception as e:
+                            self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
+                            if self.error_hook is not None:
+                                self.error_hook(task)
+
+                wait(active_futures.keys(), return_when=ALL_COMPLETED)
+                active_futures.clear()
+
+                try:
+                    del separator.model, separator
+                except:
                     pass
-                try:
-                    task.force_align(aligner)
+                self.clear_memory()
 
-                    if len(task._error_entries) == 0:
-                        render_future = render_pool.submit(task._render_karaoke)
-                        active_futures[render_future] = ("render", task)
+                network_pool.shutdown()
 
-                except Exception:
-                    if self.error_hook is not None:
-                        self.error_hook(task)
-        try:
-            del aligner.model, aligner.processor, aligner
-        except:
-            pass
-        self._clean()
+                if self.karaoke_plus_tasks:
+                    
+                    active_futures = {
+                        cpu_pool.submit(task._detect_audio_activity)
+                        : ("detect_audio", task)
+                        for task in self.karaoke_plus_tasks
+                    }
 
-        while active_futures:
-            done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
-            
-            for future in done:
-                task_type, task = active_futures.pop(future)
+                    while active_futures:
+                        done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+    
+                        for future in done:
+                            task_type, task = active_futures.pop(future)
 
-                try:
-                    res = future.result()
-                    assert task_type == "render"
+                            try:
+                                res = future.result()
+    
+                                if len(task._error_entries) == 0:
+                                    if task_type == 'detect_audio':
+                                        self.logger.info(f"Task [{task.id}] detect audio complete: {res}")
 
-                    self.logger.info(f"Task [{task.id}] Render succesful.")
-                    if self.render_hook is not None:
-                        self.render_hook(task)
+                                        if not transcriber:
+                                            transcriber = None
+                                        #transcrbe_future = gpu_pool.submit(task._transcribe, transcriber)
+                                        transcribe_future = gpu_pool.submit(print, f"{task.id} mock transcribe")
+                                        active_futures[transcribe_future] = ("transcribe", task)
 
-                except Exception as e:
-                    self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
-                    if self.error_hook is not None:
-                        self.error_hook(task)
+                                    elif task_type == 'transcribe':
+                                        self.logger.info(f"Task [{task.id}] transcribe complete: {res}")
 
-        render_pool.shutdown()
-        self.cleanup_task()
+                                        lyric_align_future = cpu_pool.submit(task._align_lyric)
+                                        active_futures[lyric_align_future] = ('align_lyric', task)
 
-        self.shutdown()
+                                    elif task_type == 'align_lyric':
+                                        self.logger.info(f"Task [{task.id}] transcribe complete: {res}")
+
+                                else:
+                                    raise OSError("Task have error therefore cannot continue.")
+
+                            except Exception as e:
+                                self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
+                                if self.error_hook is not None:
+                                    self.error_hook(task)
+                                    
+                    wait(active_futures.keys(), return_when=ALL_COMPLETED)
+                    active_futures.clear()
+
+                    try:
+                        del transcriber.model, transcriber
+                    except:
+                        pass
+                    self.clear_memory()
+
+                    active_futures = {
+                        gpu_pool.submit(task._align_force, aligner)
+                        : ('align_force', task)
+                        for task in self.karaoke_plus_tasks
+                    }
+
+                    while active_futures:
+                        done, _ = wait(active_futures.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+    
+                        for future in done:
+                            task_type, task = active_futures.pop(future)
+
+                            try:
+                                res = future.result()
+    
+                                if len(task._error_entries) == 0:
+                                    if task_type == 'align_force':
+                                        self.logger.info(f"Task [{task.id}] Separation complete: {res}")
+                                        
+                                        render_future = cpu_pool.submit(task._render_karaoke)
+                                        active_futures[render_future] = ("render", task)
+
+                                    elif task_type == "render":
+                                        self.logger.info(f"Task [{task.id}] Render succesful.")
+                                        if self.render_hook is not None:
+                                            self.render_hook(task)
+
+                                else:
+                                    raise OSError("Task have error therefore cannot continue.")
+
+                            except Exception as e:
+                                self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
+                                if self.error_hook is not None:
+                                    self.error_hook(task)
+
+                    wait(active_futures.keys(), return_when=ALL_COMPLETED)
+                    active_futures.clear()
+    
+                    try:
+                        del aligner.model, aligner.processor, aligner
+                    except:
+                        pass
+                    self.clear_memory()
+
+            except KeyboardInterrupt:
+                self.logger.warning("CTRL+C triggered. shutting down gracefully...")
+                if separator is not None:
+                    try:
+                        del separator.model, separator
+                    except:
+                        pass
+                if transcriber is not None:
+                    try:
+                        del aligner.model, aligner.processor, aligner
+                    except:
+                        pass
+                if aligner is not None:
+                    try:
+                        del aligner.model, aligner.processor, aligner
+                    except:
+                        pass
+                self.clear_memory()
+
+                for future in active_futures.keys():
+                    future.cancel()
+                    self.logger.warning(f"canceling active_futures {future}")
+                active_futures.clear()
+
+                network_pool.shutdown(wait=False, cancel_futures=True)
+                gpu_pool.shutdown(wait=False, cancel_futures=True)
+                cpu_pool.shutdown(wait=False, cancel_futures=True)
+                
+                self.shutdown()
+                raise
+
+        self.logger.info("All task completed.")
+        self.cleanup_tasks_files()
 
 
 if __name__ == "__main__":
     from iantirta.telemetry import netsvc
-    netsvc.setup_logger("iantirta")
+    netsvc.setup_logger("iantirta", default_level=logging.DEBUG)
     urls = [
         "https://youtube.com/watch?v=sdnDInjdWjw&list=RDsdnDInjdWjw&start_radio=1&pp=ygUIQmVybmFkeWGgBwE%3D",
         "https://youtube.com/watch?v=sdnDInjdWjw&list=RDsdnDInjdWjw&start_radio=1&pp=ygUIQmVybmFkeWGgBwE%3D",
-    ] * 5
+    ] * 2
     tasks = [
         {
             "id": i,
-            "source": url
+            "source": url,
+            "karaoke_type": 'plus'
         } for i, url in enumerate(urls)
     ]
+    _logger = logging.getLogger('iantirta.karaoke')
+    _logger.info("running")
     BatchKaraoke(tasks).run()
