@@ -17,7 +17,7 @@ class IantirtaAPI(BaseHTTP):
         *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
-    
+
         if api_url is not None:
             self.endpoint = api_url
 
@@ -64,4 +64,3 @@ class IantirtaAPI(BaseHTTP):
         self.raise_for_status(res)
 
         return res.json()['result']
-

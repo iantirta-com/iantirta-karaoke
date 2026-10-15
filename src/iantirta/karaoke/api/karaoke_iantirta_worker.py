@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
     from iantirta.karaoke.core.main import KaraokeTask
 
+_Sentinel = object()
+
 
 class KaraokeWorker:
     def __init__(
@@ -22,6 +24,7 @@ class KaraokeWorker:
         worker_id: int,
         user_token: dict,
         root_folder_id: str,
+        process_task_limit: int = 200,
         **kwargs
     ):
         self.api = IantirtaAPI(
@@ -47,14 +50,17 @@ class KaraokeWorker:
     def claim_task(
         self,
         domain: list[tuple] | None = None,
-        limit: int | None = 200,
+        limit: int | None = _Sentinel,
         *,
         legacy: bool = True
     ) -> list[dict[str, Any]]:
         if not domain:
             domain = [("status", "=", "waiting")]
 
-        path = '/karaoke/tasks/get' 
+        if limit is _Sentinel:
+            limit = self.process_task_limit
+
+        path = '/karaoke/tasks/get'
         params = {
             "domain": domain,
             "limit": limit
