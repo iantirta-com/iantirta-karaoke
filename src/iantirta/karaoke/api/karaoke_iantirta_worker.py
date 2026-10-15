@@ -159,7 +159,7 @@ if __name__ == '__main__':
     KaraokeWorker(
         'http://localhost:8069',
         api_token,
-        1,
+        9,
         None,
         None,
     ).run()
