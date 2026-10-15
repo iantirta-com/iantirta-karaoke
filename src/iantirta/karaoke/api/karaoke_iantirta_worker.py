@@ -41,6 +41,7 @@ class KaraokeWorker:
         self.logger.add_hook(self.store_log_entries)
 
         self.network_pool = ThreadPoolExecutor(5)
+        self.process_task_limit = process_task_limit
 
     def store_log_entries(self, record) -> None:
         root_handler = logging.getLogger().handlers[0]
