@@ -1,5 +1,9 @@
 
+import logging
+
 from iantirta.media import BaseHTTP
+
+_logger = logging.getLogger(__name__)
 
 
 class IantirtaAPI(BaseHTTP):
@@ -44,12 +48,17 @@ class IantirtaAPI(BaseHTTP):
                 f"Traceback: {error_data.get('debug')}"
             )
 
-    def make_json_request(self, path: str, params: dict):
+    def make_json_request(self, path: str, params: dict, *, logger: logging.Logger | None = None):
         payload = {
             "worker_id": self.worker_id,
             "access_token": self.access_token,
         }
         payload.update(params)
+
+        safe_payload = payload.copy()
+        safe_payload.pop("worker_id")
+        safe_payload.pop("access_token")
+        (logger or _logger).debug(f"Sending payload to ({path}) with {safe_payload}")
 
         res = self.request('get', path, json={"params": payload}, headers={"Content-Type": "application/json"})
         self.raise_for_status(res)

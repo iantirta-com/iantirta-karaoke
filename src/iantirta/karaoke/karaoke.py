@@ -156,7 +156,7 @@ class BatchKaraoke:
                                 if task_type == "download":
                                     self.logger.info(f"Task [{task.id}] Download complete: {res}")
 
-                                    if separator is not None:
+                                    if separator is None:
                                         separator = load_model(
                                             "adefossez/Demucs-mdx_extra_q",
                                             "separation",
@@ -169,8 +169,8 @@ class BatchKaraoke:
                                                 "logger" : self.logger,
                                             }
                                         )
-                                    #sep_future = gpu_pool.submit(task._separate_vocal_and_instrument, separator)
-                                    sep_future = gpu_pool.submit(print, f"{task.id} mock separate")
+                                    sep_future = gpu_pool.submit(task._separate_vocal_and_instrument, separator)
+                                    # sep_future = gpu_pool.submit(print, f"{task.id} mock separate")
                                     active_futures[sep_future] = ("separate", task)
 
                                 elif task_type == "separate":

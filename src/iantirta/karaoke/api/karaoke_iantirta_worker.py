@@ -1,15 +1,17 @@
 
 import logging
-from typing import TYPE_CHECKING, Any
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any
 
-from iantirta.karaoke.karaoke import BatchKaraoke
 from iantirta.media import DriveStorage
+
 from iantirta.karaoke.api.karaoke_iantirta_api import IantirtaAPI
+from iantirta.karaoke.karaoke import BatchKaraoke
 
 if TYPE_CHECKING:
-    from iantirta.karaoke.core.main import KaraokeTask
     from iantirta.media import DriveMetadata
+
+    from iantirta.karaoke.core.main import KaraokeTask
 
 
 class KaraokeWorker:
@@ -67,16 +69,21 @@ class KaraokeWorker:
     def worker_claim_task(self, tasks: list[dict[str, Any]]):
         return self.api.make_json_request(
             '/karaoke/worker/claim_task',
-            {'task_ids': [task['id'] for task in tasks]}
+            {'task_ids': [task['id'] for task in tasks]},
+            logger=self.logger,
         )
 
     def worker_start(self):
-        return self.api.make_json_request("/karaoke/worker/start", {})
+        return self.api.make_json_request(
+            "/karaoke/worker/start", {},
+            logger=self.logger,
+            )
 
     def worker_stop(self):
         return self.api.make_json_request(
             "/karaoke/worker/stop",
-            {'log_entries': self.log_entries}
+            {'log_entries': self.log_entries},
+            logger=self.logger,
         )
 
     def _upload_and_post(self, task: "KaraokeTask"):
@@ -84,21 +91,23 @@ class KaraokeWorker:
             metadata: DriveMetadata = self.drive_storage.upload(task.karaoke_path, subfolder=task.artist)
             self.api.make_json_request(
                 'karaoke/task/update',
-                {**task.to_dict(), **metadata.to_dict()}
+                {'task' : {**task.to_dict(), **metadata.to_dict()}},
+                logger=self.logger,
             )
-        except:
+        except Exception:
             self.task_error_hook(task)
 
     def _post_error_task(self, task: 'KaraokeTask'):
         try:
             self.api.make_json_request(
                 'karaoke/task/update',
-                {**task.to_dict()}
+                {'task' : {**task.to_dict()}},
+                logger=self.logger,
             )
-        except:
-            self.logger.error("Error while posting error to server")
+        except Exception as e:
+            self.logger.error(f"Error while posting error to server: {e}",)
     
-    def task_render_hook(self, task: "KaraokeTask") -> KaraokeTask:
+    def task_render_hook(self, task: "KaraokeTask") -> "KaraokeTask":
         self.network_pool.submit(
             self._upload_and_post, task,
         )
@@ -135,13 +144,14 @@ class KaraokeWorker:
             self.worker_stop()
 
 if __name__ == '__main__':
-    from iantirta.telemetry import netsvc
     import os
+
+    from iantirta.telemetry import netsvc
     netsvc.setup_logger('iantirta')
     api_token=os.environ['IANTIRTA_WORKER_API_TOKEN']
     KaraokeWorker(
         'http://localhost:8069',
-        9,
+        api_token,
         1,
         None,
         None,
