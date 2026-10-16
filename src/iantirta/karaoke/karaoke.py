@@ -304,11 +304,11 @@ class BatchKaraoke:
 
             except KeyboardInterrupt:
                 self.logger.warning("CTRL+C triggered. shutting down gracefully...")
-                if separator is not None:
-                    try:
+                try:
+                    if separator is not None:
                         del separator.model, separator
-                    except:
-                        pass
+                except:
+                    pass
                 if transcriber is not None:
                     try:
                         del aligner.model, aligner.processor, aligner
