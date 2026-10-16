@@ -1,6 +1,6 @@
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
 from typing import TYPE_CHECKING, Any
 
 from iantirta.media import DriveStorage
@@ -13,7 +13,9 @@ if TYPE_CHECKING:
 
     from iantirta.karaoke.core.main import KaraokeTask
 
+
 _Sentinel = object()
+_DefaultDomainClaimTask = [("status", "=", "waiting")]
 
 
 class KaraokeWorker:
@@ -24,8 +26,13 @@ class KaraokeWorker:
         worker_id: int,
         user_token: dict,
         root_folder_id: str,
+        *,
+        claim_task_domain: list = _DefaultDomainClaimTask,
         process_task_limit: int = 200,
+        max_download_workers: int = 5,
+        max_cpu_workers: int = 1,
         max_gpu_pool: int = 1,
+        max_upload_workers: int = 5,
         **kwargs
     ):
         self.api = IantirtaAPI(
@@ -41,13 +48,20 @@ class KaraokeWorker:
         self.logger.setLevel(logging.DEBUG)
         self.logger.add_hook(self.store_log_entries)
 
-        self.network_pool = ThreadPoolExecutor(5)
+        self.upload_pool = ThreadPoolExecutor(max_upload_workers)
+
+        if not claim_task_domain:
+            claim_task_domain = _DefaultDomainClaimTask
+        self.claim_task_domain = claim_task_domain
+
         self.process_task_limit = process_task_limit
+
+        self.max_download_workers = max_download_workers
+        self.max_cpu_workers = max_cpu_workers
         self.max_gpu_pool = max_gpu_pool
 
     def store_log_entries(self, record) -> None:
-        root_handler = logging.getLogger().handlers[0]
-        msg = root_handler.formatter.format(record)
+        msg = netsvc.formatLogMessage(record)
         self.log_entries.append(msg)
 
     def claim_task(
@@ -55,10 +69,10 @@ class KaraokeWorker:
         domain: list[tuple] | None = None,
         limit: int | None = _Sentinel,
         *,
-        legacy: bool = True
+        legacy: bool = False
     ) -> list[dict[str, Any]]:
         if not domain:
-            domain = [("status", "=", "waiting")]
+            domain = self.claim_task_domain
 
         if limit is _Sentinel:
             limit = self.process_task_limit
@@ -69,11 +83,9 @@ class KaraokeWorker:
             "limit": limit
         }
 
-        if legacy:
-            params["action"] = "get"
-            path = '/karaoke/tasks'
-
-        return self.api.make_json_request(path, params)
+        return self.api.make_json_request(
+            path, params, logger=self.logger
+        )
 
     def worker_claim_task(self, tasks: list[dict[str, Any]]):
         return self.api.make_json_request(
@@ -114,23 +126,23 @@ class KaraokeWorker:
         try:
             self.api.make_json_request(
                 'karaoke/task/update',
-                {'task' : {**task.to_dict()}},
+                {'task': {**task.to_dict()}},
                 logger=self.logger,
             )
         except Exception as e:
             self.logger.error(f"Error while posting error to server: {e}",)
-    
-    def task_render_hook(self, task: "KaraokeTask", network_pool: ThreadPoolExecutor | None = None) -> None:
-        (network_pool or self.network_pool).submit(
+
+    def task_render_hook(self, task: "KaraokeTask") -> Future:
+        return self.upload_pool.submit(
             self._upload_and_post, task,
         )
 
-    def task_error_hook(self, task: "KaraokeTask", network_pool: ThreadPoolExecutor | None = None) -> None:
-        (network_pool or self.network_pool).submit(
+    def task_error_hook(self, task: "KaraokeTask") -> Future:
+        return self.upload_pool.submit(
             self._post_error_task, task
         )
 
-    def run(self):
+    def run(self, *, once=False, dry_run=False):
         try:
             self.worker_start()
             while True:
@@ -152,8 +164,11 @@ class KaraokeWorker:
                     processor.run()
                 except Exception as e:
                     self.logger.error(f"Error while doing batch karaoke process: {e}")
+
+                if once:
+                    break
         finally:
-            self.network_pool.shutdown(wait=True, cancel_futures=False)
+            self.upload_pool.shutdown(wait=True, cancel_futures=False)
             self.worker_stop()
 
 if __name__ == '__main__':
