@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from typing import TYPE_CHECKING, Any
 
 from iantirta.media import DriveStorage
+from iantirta.telemetry import netsvc
 
 from iantirta.karaoke.api.karaoke_iantirta_api import IantirtaAPI
 from iantirta.karaoke.karaoke import BatchKaraoke
