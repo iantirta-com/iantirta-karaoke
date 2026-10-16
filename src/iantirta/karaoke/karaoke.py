@@ -196,7 +196,7 @@ class BatchKaraoke:
                                     assert task.karaoke_type == "basic"
                                     self.logger.info(f"Task [{task.id}] Render succesful.")
                                     if self.render_hook is not None:
-                                        self.render_hook(task)
+                                        self.render_hook(task, network_pool)
 
                             else:
                                 raise OSError("Task have error therefore cannot continue.")
@@ -204,7 +204,7 @@ class BatchKaraoke:
                         except Exception as e:
                             self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
                             if self.error_hook is not None:
-                                self.error_hook(task)
+                                self.error_hook(task, network_pool)
 
                 wait(active_futures.keys(), return_when=ALL_COMPLETED)
                 active_futures.clear()
@@ -214,8 +214,6 @@ class BatchKaraoke:
                 except:
                     pass
                 self.clear_memory()
-
-                network_pool.shutdown()
 
                 if self.karaoke_plus_tasks:
                     
@@ -259,7 +257,7 @@ class BatchKaraoke:
                             except Exception as e:
                                 self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
                                 if self.error_hook is not None:
-                                    self.error_hook(task)
+                                    self.error_hook(task, network_pool)
                                     
                     wait(active_futures.keys(), return_when=ALL_COMPLETED)
                     active_futures.clear()
@@ -295,7 +293,7 @@ class BatchKaraoke:
                                     elif task_type == "render":
                                         self.logger.info(f"Task [{task.id}] Render succesful.")
                                         if self.render_hook is not None:
-                                            self.render_hook(task)
+                                            self.render_hook(task, network_pool)
 
                                 else:
                                     raise OSError("Task have error therefore cannot continue.")
@@ -303,7 +301,7 @@ class BatchKaraoke:
                             except Exception as e:
                                 self.logger.error(f"Task [{task.id}] Error during {task_type}: {e}")
                                 if self.error_hook is not None:
-                                    self.error_hook(task)
+                                    self.error_hook(task, network_pool)
 
                     wait(active_futures.keys(), return_when=ALL_COMPLETED)
                     active_futures.clear()
@@ -344,6 +342,11 @@ class BatchKaraoke:
                 
                 self.shutdown()
                 raise
+
+            finally:
+                network_pool.shutdown()
+                gpu_pool.shutdown()
+                cpu_pool.shutdown()
 
         self.logger.info("All task completed.")
         self.cleanup_tasks_files()

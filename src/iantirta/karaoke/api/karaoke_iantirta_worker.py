@@ -120,15 +120,13 @@ class KaraokeWorker:
         except Exception as e:
             self.logger.error(f"Error while posting error to server: {e}",)
     
-    def task_render_hook(self, task: "KaraokeTask") -> "KaraokeTask":
-        self.logger(f"Adding task ({task.id}) to render hook pool.")
-        self.network_pool.submit(
+    def task_render_hook(self, task: "KaraokeTask", network_pool: ThreadPoolExecutor | None = None) -> None:
+        (network_pool or self.network_pool).submit(
             self._upload_and_post, task,
         )
-        return task
 
-    def task_error_hook(self, task: "KaraokeTask"):
-        self.network_pool.submit(
+    def task_error_hook(self, task: "KaraokeTask", network_pool: ThreadPoolExecutor | None = None) -> None:
+        (network_pool or self.network_pool).submit(
             self._post_error_task, task
         )
 
