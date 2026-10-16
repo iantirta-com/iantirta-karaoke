@@ -97,7 +97,7 @@ class KaraokeWorker:
 
     def _upload_and_post(self, task: "KaraokeTask"):
         try:
-            metadata: DriveMetadata = self.drive_storage.upload(task.karaoke_path, subfolder=task.artist)
+            metadata: DriveMetadata = self.drive_storage.upload(task.karaoke_path, subfolder=task.artist, logger=task.logger)
             self.api.make_json_request(
                 'karaoke/task/update',
                 {'task' : {**task.to_dict(), **metadata.to_dict()}},
