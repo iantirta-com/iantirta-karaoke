@@ -103,7 +103,11 @@ class KaraokeWorker:
                 {'task' : {**task.to_dict(), **metadata.to_dict()}},
                 logger=self.logger,
             )
-        except Exception:
+        except Exception as e:
+            self.logger.warning(
+                "Exception when trying to upload and post "
+                f"Task ({task.id}) Error: {e}"
+            )
             self.task_error_hook(task)
 
     def _post_error_task(self, task: 'KaraokeTask'):
