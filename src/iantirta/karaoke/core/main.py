@@ -209,7 +209,7 @@ class KaraokeTask:
 
         from iantirta.media import get_lyric
 
-        lyric_metadata: LyricMetadata = get_lyric(self.title, self.artist, self.duration)
+        lyric_metadata: LyricMetadata = get_lyric(self.title, self.artist, self.duration, logger=self.logger)
 
         self.title = lyric_metadata.trackName
         self.artist = lyric_metadata.artistName

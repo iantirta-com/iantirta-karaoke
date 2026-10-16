@@ -6,7 +6,13 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ALL_COMPLETED, FIRST_COMPLETED, ThreadPoolExecutor, wait, as_completed
+from concurrent.futures import (
+    ALL_COMPLETED,
+    FIRST_COMPLETED,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +33,8 @@ class BatchKaraoke:
         *,
         render_hook: Callable | None = None,
         error_hook: Callable | None = None,
-        logger: logging.Logger | None = None
+        logger: logging.Logger | None = None,
+        max_gpu_pool: int = 1,
     ):
         self._karaoke_tasks = [
             KaraokeTask.from_dict(**task)
@@ -40,6 +47,11 @@ class BatchKaraoke:
         self.error_hook = error_hook
         
         self.logger = (logger or _logger)
+        if max_gpu_pool is None:
+            max_gpu_pool = 1
+        if max_gpu_pool <= 0:
+            raise OSError("Gpu pool needs to be above 0")
+        self.max_gpu_pool = max_gpu_pool
 
         self.main_thread_id = threading.current_thread().ident
         self.quit_signals_received = 0
@@ -132,7 +144,7 @@ class BatchKaraoke:
 
         with (
             ThreadPoolExecutor(max_workers=5, thread_name_prefix="NetPool") as network_pool,
-            ThreadPoolExecutor(max_workers=1, thread_name_prefix="GpuPool") as gpu_pool,
+            ThreadPoolExecutor(max_workers=self.max_gpu_pool, thread_name_prefix="GpuPool") as gpu_pool,
             ThreadPoolExecutor(max_workers=1, thread_name_prefix="CpuPool") as cpu_pool
         ):
             try:

@@ -25,6 +25,7 @@ class KaraokeWorker:
         user_token: dict,
         root_folder_id: str,
         process_task_limit: int = 200,
+        max_gpu_pool: int = 1,
         **kwargs
     ):
         self.api = IantirtaAPI(
@@ -42,6 +43,7 @@ class KaraokeWorker:
 
         self.network_pool = ThreadPoolExecutor(5)
         self.process_task_limit = process_task_limit
+        self.max_gpu_pool = max_gpu_pool
 
     def store_log_entries(self, record) -> None:
         root_handler = logging.getLogger().handlers[0]
@@ -84,7 +86,7 @@ class KaraokeWorker:
         return self.api.make_json_request(
             "/karaoke/worker/start", {},
             logger=self.logger,
-            )
+        )
 
     def worker_stop(self):
         return self.api.make_json_request(
@@ -115,6 +117,7 @@ class KaraokeWorker:
             self.logger.error(f"Error while posting error to server: {e}",)
     
     def task_render_hook(self, task: "KaraokeTask") -> "KaraokeTask":
+        self.logger(f"Adding task ({task.id}) to render hook pool.")
         self.network_pool.submit(
             self._upload_and_post, task,
         )
@@ -141,7 +144,8 @@ class KaraokeWorker:
                         tasks,
                         render_hook=self.task_render_hook,
                         error_hook=self.task_error_hook,
-                        logger=self.logger
+                        logger=self.logger,
+                        max_gpu_pool=self.max_gpu_pool,
                     )
                     processor.run()
                 except Exception as e:
