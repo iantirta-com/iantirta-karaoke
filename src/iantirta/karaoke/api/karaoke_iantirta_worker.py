@@ -1,6 +1,6 @@
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from iantirta.media import DriveStorage
@@ -40,7 +40,8 @@ class KaraokeWorker:
             api_url, api_token, worker_id
         )
         self.drive_storage = DriveStorage(
-            user_token, root_folder_id
+            root_folder_id=root_folder_id,
+            access_token=user_token,
         )
 
         self.log_entries = []
