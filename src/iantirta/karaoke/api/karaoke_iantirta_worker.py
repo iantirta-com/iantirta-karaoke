@@ -3,14 +3,13 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
-from iantirta.media import DriveStorage
 from iantirta.telemetry import netsvc
 
 from iantirta.karaoke.api.karaoke_iantirta_api import IantirtaAPI
 from iantirta.karaoke.karaoke import BatchKaraoke
 
 if TYPE_CHECKING:
-    from iantirta.media import DriveMetadata
+    from iantirta.media.cloud_storage.base_storage import StorageMixin
 
     from iantirta.karaoke.core.main import KaraokeTask
 
@@ -22,12 +21,11 @@ _DefaultDomainClaimTask = [("status", "=", "waiting")]
 class KaraokeWorker:
     def __init__(
         self,
+        *,
         api_url: str,
         api_token: str,
         worker_id: int,
-        user_token: dict,
-        root_folder_id: str,
-        *,
+        storage_options: dict,
         claim_task_domain: list = _DefaultDomainClaimTask,
         process_task_limit: int = 200,
         max_download_workers: int = 5,
@@ -39,10 +37,15 @@ class KaraokeWorker:
         self.api = IantirtaAPI(
             api_url, api_token, worker_id
         )
-        self.drive_storage = DriveStorage(
-            root_folder_id=root_folder_id,
-            access_token=user_token,
-        )
+        provider = storage_options.pop('provider')
+        if provider == 'gdrive':
+            from iantirta.media import DriveStorage
+            self.storage_api = DriveStorage(**storage_options)
+        elif provider == 'hf_dataset':
+            from iantirta.media import HFDatasetStorage
+            self.storage_api = HFDatasetStorage(**storage_options)
+        else:
+            raise NotImplementedError()
 
         self.log_entries = []
 
@@ -110,11 +113,19 @@ class KaraokeWorker:
         )
 
     def _upload_and_post(self, task: "KaraokeTask"):
+        self.storage_api: StorageMixin
         try:
-            metadata: DriveMetadata = self.drive_storage.upload(task.karaoke_path, subfolder=task.artist, logger=task.logger)
+            download_uris: list[str] = self.storage_api.upload_file(
+                src_path=task.karaoke_path,
+                target_path=task.artist,
+                logger=task.logger
+            )
             self.api.make_json_request(
                 'karaoke/task/update',
-                {'task' : {**task.to_dict(), **metadata.to_dict()}},
+                {'task' : {
+                    **task.to_dict(),
+                    'download_uris': download_uris,
+                }},
                 logger=self.logger,
             )
         except Exception as e:
