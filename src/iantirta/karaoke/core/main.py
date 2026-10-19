@@ -109,7 +109,8 @@ class KaraokeTask:
             "title": self.title,
             "artist": self.artist,
             "log_entries": self._log_entries,
-            "error_entries": self._error_entries, 
+            "error_entries": self._error_entries,
+            'thumbnail': self.thumbnail,
         }
 
     # Specific Karaoke path
