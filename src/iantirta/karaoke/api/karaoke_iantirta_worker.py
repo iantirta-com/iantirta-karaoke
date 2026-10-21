@@ -2,6 +2,9 @@
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
+import time
+import shutil
+import threading
 
 from iantirta.telemetry import netsvc
 
@@ -32,12 +35,18 @@ class KaraokeWorker:
         max_cpu_workers: int = 1,
         max_gpu_pool: int = 1,
         max_upload_workers: int = 5,
+        max_batch_size: int = 15,
+        max_wait_seconds: float = 30.0,
         **kwargs
     ):
+        # Server
         self.api = IantirtaAPI(
             api_url, api_token, worker_id
         )
+
+        # Storage
         provider = storage_options.pop('provider')
+        self.storage_api: StorageMixin
         if provider == 'gdrive':
             from iantirta.media import DriveStorage
             self.storage_api = DriveStorage(**storage_options)
@@ -46,6 +55,7 @@ class KaraokeWorker:
             self.storage_api = HFDatasetStorage(**storage_options)
         else:
             raise NotImplementedError()
+        self.storage_provider = provider
 
         self.log_entries = []
 
@@ -65,9 +75,53 @@ class KaraokeWorker:
         self.max_cpu_workers = max_cpu_workers
         self.max_gpu_pool = max_gpu_pool
 
+        self.lock = threading.Lock()
+        self.task_buffer: list = []
+        self.last_flush_time = time.time()
+        self.max_batch_size = max_batch_size
+        self.max_wait_seconds = max_wait_seconds
+
     def store_log_entries(self, record) -> None:
         msg = netsvc.formatLogMessage(record)
         self.log_entries.append(msg)
+
+    def _flush_task_to_server(self):
+        if not self.task_buffer:
+            return
+
+        try:
+            self.api.make_json_request(
+                'karaoke/task/update',
+                {'tasks': self.task_buffer},
+                logger=self.logger,
+            )
+        except Exception as e:
+            self.logger.error(f"Error while posting update to server: {e}",)
+
+    def _flush_upload_to_storage(self):
+        try:
+            self.storage_api.upload_folder(
+                folder_path=self.storage_api.staging_dir,
+                logger=self.logger,
+            )
+        except Exception as e:
+            self.logger.error(f"Error while uploading files to storage: {e}",)
+
+    def flush(self) -> None:
+        with self.lock:
+            self._flush_task_to_server()
+            self._flush_task_to_server()
+
+            # remove data
+            shutil.rmtree(self.storage_api.staging_dir)
+            self.task_buffer.clear()
+            self.last_flush_time = time.time()
+
+    def flush_if_needed(self) -> None:
+        with self.lock:
+            time_elapsed = time.time() - self.last_flush_time
+            if len(self.task_buffer) >= self.max_batch_size or time_elapsed >= self.max_wait_seconds:
+                self.flush()
 
     def claim_task(
         self,
@@ -113,21 +167,20 @@ class KaraokeWorker:
         )
 
     def _upload_and_post(self, task: "KaraokeTask"):
-        self.storage_api: StorageMixin
         try:
-            download_uris: list[str] = self.storage_api.upload_file(
-                src_path=task.karaoke_path,
-                target_path=task.artist,
-                logger=task.logger
-            )
-            self.api.make_json_request(
-                'karaoke/task/update',
-                {'task' : {
-                    **task.to_dict(),
-                    'download_uris': download_uris,
-                }},
-                logger=self.logger,
-            )
+            with self.lock:
+                chunk_metadata: dict = self.storage_api.make_chunk_file(
+                    src_path=task.karaoke_path,
+                    target_path=task.artist,
+                )
+            chunk_metadata['provider'] = self.storage_provider
+
+            self.task_buffer.append({
+                **task.to_dict(),
+                'download_uris': chunk_metadata,
+            })
+            self.flush_if_needed()
+
         except Exception as e:
             self.logger.warning(
                 "Exception when trying to upload and post "
@@ -136,14 +189,8 @@ class KaraokeWorker:
             self.task_error_hook(task)
 
     def _post_error_task(self, task: 'KaraokeTask'):
-        try:
-            self.api.make_json_request(
-                'karaoke/task/update',
-                {'task': {**task.to_dict()}},
-                logger=self.logger,
-            )
-        except Exception as e:
-            self.logger.error(f"Error while posting error to server: {e}",)
+        self.task_buffer.append({**task.to_dict()})
+        self.flush_if_needed()
 
     def task_render_hook(self, task: "KaraokeTask") -> Future:
         return self.upload_pool.submit(
@@ -181,6 +228,7 @@ class KaraokeWorker:
                 if once:
                     break
         finally:
+            self.flush()
             self.upload_pool.shutdown(wait=True, cancel_futures=False)
             self.worker_stop()
 
