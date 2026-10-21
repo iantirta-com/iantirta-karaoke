@@ -1,10 +1,11 @@
 
 import logging
-from concurrent.futures import Future, ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
-import time
 import shutil
 import threading
+import time
+from pathlib import Path
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any
 
 from iantirta.telemetry import netsvc
 
@@ -61,6 +62,9 @@ class KaraokeWorker:
 
         self.logger = logging.getLogger(f"Worker({worker_id})")
         self.logger.setLevel(logging.DEBUG)
+        if not hasattr(self.logger, 'add_hook'):
+            from iantirta.telemetry import netsvc
+            netsvc.setup_logger("iantirta")
         self.logger.add_hook(self.store_log_entries)
 
         self.upload_pool = ThreadPoolExecutor(max_upload_workers)
@@ -75,48 +79,81 @@ class KaraokeWorker:
         self.max_cpu_workers = max_cpu_workers
         self.max_gpu_pool = max_gpu_pool
 
-        self.lock = threading.Lock()
-        self.task_buffer: list = []
+        self.lock = threading.RLock()
+        self.task_buffer: list[KaraokeTask] = []
         self.last_flush_time = time.time()
         self.max_batch_size = max_batch_size
         self.max_wait_seconds = max_wait_seconds
 
-    def store_log_entries(self, record) -> None:
-        msg = netsvc.formatLogMessage(record)
-        self.log_entries.append(msg)
+    def store_log_entries(self, record: logging.LogRecord) -> None:
+        log_data = {
+            'name': record.name,
+            'level': record.levelname,
+            'message': record.msg,
+            'path': Path(record.pathname).as_posix(),
+            'line': record.lineno,
+            'func': record.funcName,
+        }
+        self.log_entries.append(log_data)
 
     def _flush_task_to_server(self):
+        """ Will flush data to iantirta server,
+            Any error while doing this, shouldn't
+            be redirect to task error, but worker error
+            instead.
+        """
+        self.logger.debug(f"Flushing buffer data to server, length={len(self.task_buffer)}...")
+    
         if not self.task_buffer:
             return
 
         try:
             self.api.make_json_request(
                 'karaoke/task/update',
-                {'tasks': self.task_buffer},
+                {'tasks': [task.to_dict() for task in self.task_buffer]},
                 logger=self.logger,
             )
         except Exception as e:
             self.logger.error(f"Error while posting update to server: {e}",)
 
     def _flush_upload_to_storage(self):
-        try:
-            self.storage_api.upload_folder(
-                folder_path=self.storage_api.staging_dir,
-                logger=self.logger,
-            )
-        except Exception as e:
-            self.logger.error(f"Error while uploading files to storage: {e}",)
+        self.logger.debug(f"Flushing staging dir, path={self.storage_api.staging_dir.as_posix()}...")
+        self.storage_api.upload_folder(
+            folder_path=self.storage_api.staging_dir,
+            logger=self.logger,
+        )
 
     def flush(self) -> None:
+        
         with self.lock:
-            self._flush_task_to_server()
+            if not self.task_buffer:
+                return
+
+            self.logger.debug(f"Flushing task buffer data ({len(self.task_buffer)} tasks)...")
+
+            # Try storage upload first
+            try:
+                # We only attempt to upload if there are actual physical files staged.
+                # (If the buffer ONLY contains error tasks, the staging dir might not exist/be empty)
+                if self.storage_api.staging_dir.exists():  # c
+                    self._flush_upload_to_storage()
+            except Exception as e:
+                self.logger.error(f"Critical error while flushing storage: {e}")
+                # Revert successful tasks in the buffer to 'error' 
+                # because the files failed to upload.
+                self.logger.debug(f"Current task buffer: {self.task_buffer}")
+                for task in self.task_buffer:
+                    task.error('_flush_upload_to_storage', e)
+
+            # Flush task should not record task error
+            # Rather it belong to the worker
             self._flush_task_to_server()
 
             # remove data
-            shutil.rmtree(self.storage_api.staging_dir)
+            shutil.rmtree(self.storage_api.staging_dir, ignore_errors=True)
             self.task_buffer.clear()
             self.last_flush_time = time.time()
-
+            
     def flush_if_needed(self) -> None:
         with self.lock:
             time_elapsed = time.time() - self.last_flush_time
@@ -175,10 +212,8 @@ class KaraokeWorker:
                 )
             chunk_metadata['provider'] = self.storage_provider
 
-            self.task_buffer.append({
-                **task.to_dict(),
-                'download_uris': chunk_metadata,
-            })
+            task.download_uris = chunk_metadata
+            self.task_buffer.append(task)
             self.flush_if_needed()
 
         except Exception as e:
@@ -186,10 +221,11 @@ class KaraokeWorker:
                 "Exception when trying to upload and post "
                 f"Task ({task.id}) Error: {e}"
             )
+            task.error('_upload_and_post', e)
             self.task_error_hook(task)
 
     def _post_error_task(self, task: 'KaraokeTask'):
-        self.task_buffer.append({**task.to_dict()})
+        self.task_buffer.append(task)
         self.flush_if_needed()
 
     def task_render_hook(self, task: "KaraokeTask") -> Future:
@@ -228,20 +264,6 @@ class KaraokeWorker:
                 if once:
                     break
         finally:
-            self.flush()
             self.upload_pool.shutdown(wait=True, cancel_futures=False)
+            self.flush()
             self.worker_stop()
-
-if __name__ == '__main__':
-    import os
-
-    from iantirta.telemetry import netsvc
-    netsvc.setup_logger('iantirta')
-    api_token=os.environ['IANTIRTA_WORKER_API_TOKEN']
-    KaraokeWorker(
-        'http://localhost:8069',
-        api_token,
-        9,
-        None,
-        None,
-    ).run()

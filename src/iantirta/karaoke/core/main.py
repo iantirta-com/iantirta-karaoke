@@ -27,7 +27,7 @@ log_levels = {
 
 def report_perf(cls):
     for name, attr in cls.__dict__.items():
-        if name.startswith(("__", "log", "error", "store_log_entries")):
+        if name.startswith(("__", "log", "error", "store_log_entries", 'to_dict')):
             continue
 
         if isinstance(attr, (property, staticmethod)):
@@ -61,6 +61,8 @@ class KaraokeTask:
     artist: str | None = None
     duration: float | None = None
     thumbnail: str | None = None
+
+    download_uris: dict | None = None
 
     karaoke_type: Literal["basic", "plus"] = "basic"
 
@@ -111,6 +113,7 @@ class KaraokeTask:
             "log_entries": self._log_entries,
             "error_entries": self._error_entries,
             'thumbnail': self.thumbnail,
+            'download_uris': self.download_uris,
         }
 
     # Specific Karaoke path
@@ -306,7 +309,7 @@ class KaraokeTask:
     @karaoke_path.setter
     def karaoke_path(self, value: str | Path):
         if not Path(value).is_file():
-            raise FileNotFoundError(f"Instrument File Not Exist: {value}")
+            raise FileNotFoundError(f"Karaoke File Not Exist: {value}")
 
         else:
             self._karaoke_path = Path(value)
