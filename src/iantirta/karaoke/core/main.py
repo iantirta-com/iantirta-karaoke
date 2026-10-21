@@ -62,6 +62,8 @@ class KaraokeTask:
     duration: float | None = None
     thumbnail: str | None = None
 
+    download_uris: dict | None = None
+
     karaoke_type: Literal["basic", "plus"] = "basic"
 
     _lyric: str | None = None
@@ -111,6 +113,7 @@ class KaraokeTask:
             "log_entries": self._log_entries,
             "error_entries": self._error_entries,
             'thumbnail': self.thumbnail,
+            'download_uris': self.download_uris,
         }
 
     # Specific Karaoke path
@@ -306,7 +309,7 @@ class KaraokeTask:
     @karaoke_path.setter
     def karaoke_path(self, value: str | Path):
         if not Path(value).is_file():
-            raise FileNotFoundError(f"Instrument File Not Exist: {value}")
+            raise FileNotFoundError(f"Karaoke File Not Exist: {value}")
 
         else:
             self._karaoke_path = Path(value)

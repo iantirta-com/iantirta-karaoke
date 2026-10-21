@@ -1,13 +1,13 @@
 
+import gc
 import logging
 import threading
-import gc
 from collections.abc import Callable
 from concurrent.futures import (
     FIRST_COMPLETED,
+    Future,
     ThreadPoolExecutor,
     wait,
-    Future,
 )
 from typing import Any
 
