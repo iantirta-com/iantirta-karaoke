@@ -36,8 +36,8 @@ class KaraokeWorker:
         max_cpu_workers: int = 1,
         max_gpu_pool: int = 1,
         max_upload_workers: int = 5,
-        max_batch_size: int = 15,
-        max_wait_seconds: float = 30.0,
+        max_batch_size: int = 15,           # ETA: 15 - 30 minutes
+        max_wait_seconds: float = 15 * 60.0,     # 1 - 15 task
         **kwargs
     ):
         # Server
@@ -205,16 +205,17 @@ class KaraokeWorker:
 
     def _upload_and_post(self, task: "KaraokeTask"):
         try:
-            with self.lock:
-                chunk_metadata: dict = self.storage_api.make_chunk_file(
-                    src_path=task.karaoke_path,
-                    target_path=task.artist,
-                )
+            # I/O shouldnt need a lock
+            chunk_metadata: dict = self.storage_api.make_chunk_file(
+                src_path=task.karaoke_path,
+                target_path=task.artist,
+            )
             chunk_metadata['provider'] = self.storage_provider
-
             task.download_uris = chunk_metadata
-            self.task_buffer.append(task)
-            self.flush_if_needed()
+
+            with self.lock:
+                self.task_buffer.append(task)
+                self.flush_if_needed()
 
         except Exception as e:
             self.logger.warning(
@@ -260,6 +261,9 @@ class KaraokeWorker:
                     processor.run()
                 except Exception as e:
                     self.logger.error(f"Error while doing batch karaoke process: {e}")
+
+                # Flush if any
+                self.flush()
 
                 if once:
                     break
