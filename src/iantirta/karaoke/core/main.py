@@ -27,7 +27,7 @@ log_levels = {
 
 def report_perf(cls):
     for name, attr in cls.__dict__.items():
-        if name.startswith(("__", "log", "error", "store_log_entries")):
+        if name.startswith(("__", "log", "error", "store_log_entries", 'to_dict')):
             continue
 
         if isinstance(attr, (property, staticmethod)):

@@ -3,6 +3,7 @@ import logging
 import shutil
 import threading
 import time
+from pathlib import Path
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
@@ -84,9 +85,16 @@ class KaraokeWorker:
         self.max_batch_size = max_batch_size
         self.max_wait_seconds = max_wait_seconds
 
-    def store_log_entries(self, record) -> None:
-        msg = netsvc.formatLogMessage(record)
-        self.log_entries.append(msg)
+    def store_log_entries(self, record: logging.LogRecord) -> None:
+        log_data = {
+            'name': record.name,
+            'level': record.levelname,
+            'message': record.msg,
+            'path': Path(record.pathname).as_posix(),
+            'line': record.lineno,
+            'func': record.funcName,
+        }
+        self.log_entries.append(log_data)
 
     def _flush_task_to_server(self):
         """ Will flush data to iantirta server,
