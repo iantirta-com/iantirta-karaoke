@@ -1,5 +1,6 @@
-import pytest
 import os
+
+import pytest
 
 from iantirta.karaoke.core.main import KaraokeTask
 
@@ -13,7 +14,7 @@ def karaoke_worker():
     return KaraokeWorker(
         api_url="http://localhost:8069",
         api_token=os.environ['IANTIRTA_WORKER_API_TOKEN'],
-        worker_id=1,
+        worker_id=9,
         storage_options={
             'provider': 'hf_dataset',
             'access_token': None,
