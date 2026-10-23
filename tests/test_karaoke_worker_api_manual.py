@@ -64,6 +64,30 @@ def test_worker_all(karaoke_worker):
             "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/566e7dcab55366747c0c9e5999ab130268308c9e5ea19baed46db3a9b1a6c791?download=true"
         ]
 
+    if len(tasks) > 2:
+        tasks[2].download_uris = {
+            "count": 9,
+            "files": [
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/52d4c0ea4262cd7ea04688e5e0b3e42e257c6829a063a21de4f14125de15ddf5",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/f1664a82205a61924d13f158a127809d8f96d9aa03b85718e725e7c1cff61e3d",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/fb9cbd08275a0b8592b11a069669d6115c5ba2fc50a060ebd6dfba0a1a89f2af",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/6ffd8424e37f33265ba81fcd3a92b92962aaef30f9f9976b71d9abe8f5a7304c",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/229c9107a75550e4e9dbda182a1242fa685c8eebb44cdda236fe15f3d76ea0b5",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/a83b3aaa86fe5c6d7030cf3ce465aba5ef97f7bbe3108dddae2d45f92cfeecdd",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/7819d64fc57ad6481e0b74ae73fa42d51d15f1c2e45654492f419166192926fe",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/7f14ad1bd8a3cf968478391f1c06dc8de8a7ddeb990b39d9125631bf0eed6383",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/f379cac6657bd23155c9ec21dd415cc6e539bb4df282132df11c13d15de44db3"
+            ],
+            "provider": "hf_dataset",
+            "size": 45730471,
+            "suffix": ".mkv"
+        }
+
+    if len(tasks) > 3:
+        tasks[3].download_uris = [
+            "https://drive.google.com/uc?id=1dxKT1VO2ix-8aTlCaX4jOp0AaukA-BKH&export=download"
+        ]
+
     karaoke_worker.task_buffer = tasks
     res_flush_to_server = karaoke_worker._flush_task_to_server()
     res_worker_stop = karaoke_worker.worker_stop()
