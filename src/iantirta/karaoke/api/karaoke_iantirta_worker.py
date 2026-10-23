@@ -89,7 +89,7 @@ class KaraokeWorker:
         log_data = {
             'name': record.name,
             'level': record.levelname,
-            'message': record.msg,
+            'message': record.getMessage(),
             'path': Path(record.pathname).as_posix(),
             'line': record.lineno,
             'func': record.funcName,
