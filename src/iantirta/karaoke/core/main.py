@@ -85,6 +85,17 @@ class KaraokeTask:
 
         self.logger.add_hook(self.store_log_entries)
 
+        import iantirta.text as text_utils
+        self.title = text_utils.normalize(self.title, lowercase=False).replace("'", '').replace('/', '-')
+        self.title = text_utils.filter_text(
+            self.title,
+            [
+                '(Official Lyric Video)',
+                'Official Karaoke Video',
+                'Karaoke'
+            ]
+        ).replace('(-)', '').replace('()', '').strip()
+
     def store_log_entries(self, record) -> None:
         root_handler = logging.getLogger().handlers[0]
         msg = root_handler.formatter.format(record)
@@ -95,6 +106,12 @@ class KaraokeTask:
         tb_str = traceback.format_exc()
         
         self._error_entries.append((fn_name, str(type(error)), err_msg, tb_str))
+
+        # Reset download_uris as to avoid marking it as successful.
+        if self.download_uris:
+            self.logger.warning("Resetting download uris because of task error")
+            self.download_uris = None
+
         self.logger.error(f"[{fn_name}] {err_msg}")
 
     @classmethod

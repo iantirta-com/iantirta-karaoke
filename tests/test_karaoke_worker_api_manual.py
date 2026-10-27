@@ -88,6 +88,45 @@ def test_worker_all(karaoke_worker):
             "https://drive.google.com/uc?id=1dxKT1VO2ix-8aTlCaX4jOp0AaukA-BKH&export=download"
         ]
 
+    if len(tasks) > 4:
+        tasks[4].download_uris = {
+            "count": 15,
+            "files": [
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/a5/a58faea13f2d5d2d0a9e3443a814bfff30d0ad7de3c45cacc65ba0c128fcfbba",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/3f/3f5528cb691298d4b851baf9e72bf357bd489d5a4f1c60b1bdc08216097184ac",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/a5/a58cb1b1d728b8945952bbb5d855a5f14103ee3725f50530d697469ec6d90128",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/bd/bd25c57a377336d394c3229a9f1ff219a13bfcfbe0db33f6b90dd9b0fefcce22",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/bf/bf42fba8b7924249668ce9408a8d16874905229112e72f179cf4982d4684c319",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/e4/e468941a73f18c5424f07dcd4cbfa3d50e13b580a68f50fc2dc045b3ae24044c",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/01/01180bb40c5cf95f4f273c7c431fc50d0a6979c67e02b780257e5e3fa5f971bd",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/a9/a9da37a96c61bcbd3aff7271a380dcdc857e6e43164506c44e3819496a8784ea",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/07/07e1d498680c861e5de69695bb1d7a0337234b8492cf0f358a8a4a6e6e7a9873",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/66/66682cee9e19a0b7a781991c483ae8f446e1f0ac15e774a6379b406c25eb319e",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/3c/3cbc56addb57828148df3b056f86f7f786e18534dbe712bb0950ad5ad121a96b",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/91/9167cfb6140772d8a1837fb56afc140710853f8109ac07bd261c0ffb59a4eefa",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/e2/e2f2ed7b495fe0b88df7b15b2aa042cc21645196240d8aa4d8a020b990c46c39",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/18/18e782e3bd3e144a5e346faa92951be62031e8a56421a0fba69154dd3cd1a9ac",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/c8/c88b782f382d91521afc1db6d0aa8c150dbdf2af581f58412b67450a0558eeeb"
+            ],
+            "provider": "hf_dataset",
+            "size": 76014260,
+            "suffix": ".mkv"
+        }
+
+    if len(tasks) > 5:
+        tasks[5].download_uris = {
+            "count": 4,
+            "files": [
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/2a/2a89319ec8aea6b1bcef2758ce4229d1a368cb6ef89a3e1f4723cce6c511bf69",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/cc/ccf49f866971a2919db10dabb5f5b802409afcaa3f7417cb033037cb5a845c26",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/56/569b1fc38d68dfecbcefcf760e5cc0d000cca9f15f1c897f1225280fb38531ac",
+            "https://huggingface.co/datasets/yancovenant/karaoke-archive/resolve/main/a0e04c70804a9bb53a86e6a7a4dd2ebfc34ede00378214e7a859bf7fb0834622/ae/aef26219e260ea0faabee0f5ee8ce72ff80aa559c9f178bfb31d04f072eac02f"
+            ],
+            "provider": "hf_dataset",
+            "size": 19360179,
+            "suffix": ".mkv"
+        }
+
     karaoke_worker.task_buffer = tasks
     res_flush_to_server = karaoke_worker._flush_task_to_server()
     res_worker_stop = karaoke_worker.worker_stop()
@@ -99,6 +138,7 @@ def test_worker_all(karaoke_worker):
 
     from rich import inspect as i
     i(tasks)
+
 
 if __name__ == "__main__":
     import sys
