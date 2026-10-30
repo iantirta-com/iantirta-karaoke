@@ -91,7 +91,12 @@ class KaraokeTask:
 
     def _normalize_title(self):
         import iantirta.text as text_utils
-        self.title = text_utils.normalize(text=self.title, lowercase=False).replace("'", '').replace('/', '-')
+        self.title = (
+            text_utils.normalize(text=self.title, lowercase=False)
+            .replace("'", '')
+            .replace('/', '-')
+            .replace('|', '-')
+        )
         self.title = text_utils.filter_text(
             self.title,
             [
