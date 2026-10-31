@@ -366,14 +366,10 @@ if __name__ == "__main__":
         repo_id=api.storage_api.repo_id,
         repo_type='dataset'
     ))
-    migrate_new_prefix_hf_storage(api, files=files, dry_run=False)
-    delete_old_without_prefix_hf_storage(api, files=files, dry_run=False)
+    migrate_new_prefix_hf_storage(api, files=files, dry_run=True)
+    delete_old_without_prefix_hf_storage(api, files=files, dry_run=True)
     update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
         api,
         files=files,
         dry_run=False
     )
-    # tasks = get_karaoke_tasks()
-    # print(len(tasks))
-    # print(tasks)
-    # check_hf_storage_and_clean_if_not_found(api, tasks)

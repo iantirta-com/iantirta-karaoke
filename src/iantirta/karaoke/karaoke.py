@@ -525,22 +525,3 @@ class BatchKaraoke:
             task_counter["failed"],
             total_task,
         )
-
-
-if __name__ == "__main__":
-    from iantirta.telemetry import netsvc
-    netsvc.setup_logger("iantirta", default_level=logging.DEBUG)
-    urls = [
-        "https://youtube.com/watch?v=sdnDInjdWjw&list=RDsdnDInjdWjw&start_radio=1&pp=ygUIQmVybmFkeWGgBwE%3D",
-        "https://youtube.com/watch?v=sdnDInjdWjw&list=RDsdnDInjdWjw&start_radio=1&pp=ygUIQmVybmFkeWGgBwE%3D",
-    ] * 2
-    tasks = [
-        {
-            "id": i,
-            "source": url,
-            "karaoke_type": 'plus'
-        } for i, url in enumerate(urls)
-    ]
-    _logger = logging.getLogger('iantirta.karaoke')
-    _logger.info("running")
-    BatchKaraoke(tasks).run()
