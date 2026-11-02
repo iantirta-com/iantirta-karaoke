@@ -28,6 +28,7 @@ __all__ = [
 # Representing notset value instead of using None
 _Sentinel = object()
 
+DEFAULT_CLAIM_TASK_DOMAIN = []
 
 # Override KaraokeTask class
 @dataclass
@@ -119,6 +120,7 @@ class KaraokeWorker(IanTirtaAPI):
         worker_id: int,
         storage_options: dict,
         process_task_limit: int | None = 200,
+        claim_task_domain: list[tuple] | None = DEFAULT_CLAIM_TASK_DOMAIN,
 
         # Batch worker options
         num_pool_network: int = 5,
@@ -147,6 +149,8 @@ class KaraokeWorker(IanTirtaAPI):
         self.worker_token = worker_token
 
         self.process_task_limit = process_task_limit
+        self.claim_task_domain = claim_task_domain
+
         self.num_pool_network = num_pool_network
         self.num_pool_cpu = num_pool_cpu
         self.num_pool_gpu = num_pool_gpu
@@ -303,25 +307,32 @@ class KaraokeWorker(IanTirtaAPI):
 
     def claim_tasks(
         self,
+        domain: list[tuple] | None = _Sentinel,
         limit: int | None = _Sentinel
     ) -> list[dict[str, Any]]:
         """
         Method that makes api call to the server
         for getting task that needed to be processed.
 
+        :param Optional[list[tuple]] domain:
         :param Optional[int] limit:
             if ``None``, would get everything all at once.
             if ``notset``, would use this instance limit.
-
         :return: list of dictionary represanting karaoke tasks from the server.
         :rtype: list[dict[str, Any]]
         """
+        if domain is _Sentinel:
+            domain = self.claim_task_domain
+        
         if limit is _Sentinel:
             limit = self.process_task_limit
 
         return self.make_json_request(
             'karaoke/tasks/get',
-            {'limit': limit},
+            {
+                'domain': domain,
+                'limit': limit
+            },
         )
 
     def post_tasks(self, tasks: list[KaraokeTask]) -> None:
