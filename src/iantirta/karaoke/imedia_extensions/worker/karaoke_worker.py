@@ -1,23 +1,81 @@
 
 import logging
-from pathlib import Path
-import time
 import shutil
-from typing import TYPE_CHECKING, Any
-from concurrent.futures import Future, ThreadPoolExecutor
 import threading
+import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from iantirta.media import IanTirtaAPI
+
+from iantirta.karaoke.batch_karaoke_processor import BatchKaraoke
+from iantirta.karaoke.karaoke_task import KaraokeTask as KaraokeTaskMixin
 
 if TYPE_CHECKING:
     from iantirta.media.cloud_storage.base_storage import StorageMixin
 
-    from iantirta.karaoke.core.main import KaraokeTask
+
+__all__ = [
+    "KaraokeWorker"
+]
 
 
 # Representing notset value instead of using None
 _Sentinel = object()
+
+
+# Override KaraokeTask class
+@dataclass
+class KaraokeTask(KaraokeTaskMixin):
+    """
+    Wrapper to inherit the original Karaoke Task.
+
+    :param Optional[dict] download_uris:
+    """
+    download_uris: dict[str, Any] | None = None
+
+    # -----------------------
+    # Logging and debug method
+    # -----------------------
+
+    def error(self, fn_name: str, error: Exception) -> None:
+        super().error(fn_name, error)
+
+        # Reset download_uris as to avoid marking it as successful.
+        if self.download_uris is not None:
+            self.logger.warning("Resetting download uris because of task error")
+            self.download_uris = None
+
+    # -----------------------
+    # Helper method
+    # -----------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Will return necessary information. consumeable by server
+        """
+        valid_fields_mapping = {
+            'id': 'id',
+            'title': '_title',
+            'artist': 'artist',
+            'duration': 'duration',
+            'lyric': '_lyric',
+            'thumbnail_url': 'thumbnail_url',
+            'download_uris': 'download_uris',
+            'log_entries': 'log_entries',
+            "error_entries": 'error_entries',
+        }
+        return {
+            server_name: getattr(self, local_name)
+            for server_name, local_name in valid_fields_mapping.items()
+        }
+
+
+class WorkerBatchKaraoke(BatchKaraoke):
+    karaoke_task_class = KaraokeTask
 
 
 class KaraokeWorker(IanTirtaAPI):
@@ -75,11 +133,12 @@ class KaraokeWorker(IanTirtaAPI):
         super().__init__(
             endpoint=endpoint,
             logger=logging.getLogger(f"Worker({worker_id})"),
+            **kwargs,
         )
 
         if num_pool_upload < 1:
             raise ValueError(
-                "``num_pool_network`` must be >= 1"
+                "``num_pool_upload`` must be >= 1"
             )
 
         self.worker_id = worker_id
@@ -93,6 +152,7 @@ class KaraokeWorker(IanTirtaAPI):
         # --------
         # Storage
         # --------
+        storage_options = dict(storage_options)
         self.storage: StorageMixin
         self.storage_code: str = storage_options.pop('provider', None)
         if self.storage_code == 'gdrive':
@@ -107,6 +167,7 @@ class KaraokeWorker(IanTirtaAPI):
             raise TypeError(
                 f"Given provider is not yet supported {self.storage_code}"
             )
+        self.storage_lock = threading.Lock()
 
         # --------
         # Logging
@@ -319,15 +380,20 @@ class KaraokeWorker(IanTirtaAPI):
                 f"{staging_dir.as_posix()}..."
             )
 
-            self.storage.upload_folder(
-                dir_path=staging_dir
-            )
+            # Pushing only when has file
+            if staging_dir.is_dir() and any(path.is_file() for path in staging_dir.rglob("*")):
+                with self.storage_lock:
+                    self.storage.upload_folder(
+                        dir_path=staging_dir
+                    )
 
         except Exception as e:
-            self.logger.error(f"Critical error while flushing storage: {e}")
+            self.logger.exception(
+                "Critical error while flushing storage. staging_dir=%s",
+                staging_dir,
+            )
             # Mark every task in this bath as error.
             for task in tasks:
-                task.download_uris = False
                 task.error('storage.upload_folder', e)
 
         try:
@@ -335,11 +401,13 @@ class KaraokeWorker(IanTirtaAPI):
             # should also be post to the backed.
             self.post_tasks(tasks)
 
-        except Exception as e:
+        except Exception:
             # This shouldnt block main function.
             # and can make necessary cleanup.
-            self.logger.error(
-                f'Error while posting task to server. Error: {e}'
+            self.logger.exception(
+                "Unable to post tasks to server. task_ids=%s staging_dir=%s",
+                [task.id for task in tasks],
+                staging_dir,
             )
 
         shutil.rmtree(staging_dir, ignore_errors=True)
@@ -408,29 +476,16 @@ class KaraokeWorker(IanTirtaAPI):
 
         :param KaraokeTask task:
         """
-        try:
 
-            with self.lock:
-                chunk_metadata: dict = self.storage.make_chunk_file(
-                    src_path=task.karaoke_path,
-                    target_path=task.artist,
-                )
-                chunk_metadata['provider'] = self.storage_code
-                task.download_uris = chunk_metadata
-
-                self.task_buffer.append(task)
-
-        except Exception as e:
-            self.logger.warning(
-                "Exception when trying to upload and post "
-                f"Task ({task.id}) Error: {e}"
+        with self.lock:
+            chunk_metadata: dict = self.storage.make_chunk_file(
+                src_path=task.karaoke_path,
+                target_path=task.artist,
             )
-            # Trigger task error
-            task.error('_on_task_render', e)
+            chunk_metadata['provider'] = self.storage_code
+            task.download_uris = chunk_metadata
 
-            # immediately called ``_on_task_error``
-            self._on_task_error(task)
-            return
+            self.task_buffer.append(task)
 
         self.flush()
 
@@ -494,16 +549,17 @@ class KaraokeWorker(IanTirtaAPI):
                 if dry_run:
                     break
 
-                self.worker_claim_task(tasks)
-
                 try:
-                    processor = BatchKaraoke(
+                    processor = WorkerBatchKaraoke(
                         tasks,
                         on_render_hook=self.on_task_render,
                         on_error_hook=self.on_task_error,
                         logger=self.logger,
-                        max_gpu_pool=self.num_pool_gpu,
+                        num_pool_gpu=self.num_pool_gpu,
+                        num_pool_cpu=self.num_pool_cpu,
+                        num_pool_network=self.num_pool_network
                     )
+                    self.worker_claim_task(tasks)
                     processor.run()
                 except Exception as e:
                     self.logger.error(

@@ -1,0 +1,423 @@
+from __future__ import annotations
+
+import logging
+import subprocess
+import traceback
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from iantirta.media import LyricMetadata, VideoMetadata
+    from iantirta.models.audio_separation import SeparationData
+
+
+__all__ = [
+    "KaraokeTask"
+]
+
+
+@dataclass
+class KaraokeTask:
+    """
+    Wrapper classed used for representing Karaoke Process task
+    and the necessary method for each of the process.
+
+    :param id int:
+        server level external_id
+    :param str source_url:
+        Youtube source url
+    :param Literal['basic', 'plus'] karaoke_type:
+    :param Optional[str] title:
+    :param Optional[str] artist:
+    :param Optional[float] duration:
+    :param Optional[str] _lyric:
+    """
+
+    id: int
+    source_url: str
+
+    karaoke_type: Literal["basic", "plus"] = "basic"
+
+    # Flexibel data
+    _title: str | None = None
+    artist: str | None = None
+    duration: float | None = None
+    _lyric: str | None = None
+
+    # Explicitly Generated Data
+    thumbnail_url: str | None = None
+
+    # Download
+    _video_path: Path | None = None
+    _audio_path: Path | None = None
+    
+    # Separation
+    vocal_path: Path | None = None
+    instrument_path : Path | None = None
+    
+    # Full Karaoke
+    karaoke_path: Path | None = None
+
+    # Logging & Debug
+    error_entries: list[tuple] = field(repr=False, default_factory=list)
+    log_entries: list[str] = field(repr=False, default_factory=list)
+    logger: logging.Logger | None = None
+
+    _PATH_FIELDS = (
+        '_video_path',
+        '_audio_path',
+        'vocal_path',
+        'instrument_path',
+        'karaoke_path',
+    )
+
+    def __post_init__(self):
+        # Setup Logging
+        if not self.logger:
+            self.logger = logging.getLogger(f"iantirta.karaoke.Task({self.id!s})")
+            self.logger.setLevel(logging.DEBUG)
+
+        if not hasattr(self.logger, 'add_hook'):
+            from iantirta.telemetry import netsvc
+            netsvc.setup_logger("iantirta")
+
+        self.logger.add_hook(self.store_log_entries)
+
+        # Normalize title
+        if self._title:
+            self._normalize_title()
+
+        # Normalize path
+        for name in self._PATH_FIELDS:
+            value = getattr(self, name)
+
+            if value is not None and not isinstance(value, Path):
+                setattr(self, name, Path(value))
+
+    # -----------------------
+    # Logging and debug method
+    # -----------------------
+
+    def store_log_entries(self, record: logging.LogRecord) -> None:
+        """
+        This method will record log output
+        
+        :param logging.LogRecord record:
+        """
+        message = record.getMessage()
+        if record.exc_info:
+            message += '\n' + ''.join(
+                traceback.format_exception(*record.exc_info)
+            )
+
+        self.log_entries.append(message)
+
+    def error(self, fn_name: str, error: Exception) -> None:
+        """
+        Record error for this task.
+
+        :param str fn_name:
+        :param Exception error:
+        """
+        err_msg = str(error)
+        self.error_entries.append((fn_name, str(type(error)), err_msg, traceback.format_exc()))
+
+        self.logger.error(f"[{fn_name}] {err_msg}")
+
+    # -----------------------
+    # Helper method
+    # -----------------------
+
+    @classmethod
+    def from_dict(cls, **datas) -> KaraokeTask:
+        """
+        Class method that normalized passed dict data
+        into this dataclass instances.
+        """
+        valid_keys = {f.name for f in fields(cls)}
+
+        if 'title' in datas:
+            datas['_title'] = datas.pop('title')
+
+        if 'lyric' in datas:
+            datas['_lyric'] = datas.pop('lyric')
+
+        return cls(**{
+            k: v
+            for k, v in datas.items()
+            if k in valid_keys
+        })
+
+    def _normalize_title(self):
+        import iantirta.text as text_utils
+        self._title = (
+            text_utils.normalize(text=self._title, lowercase=False)
+            .replace("'", '')
+            .replace('/', '-')
+            .replace('|', '-')
+        )
+        self._title = text_utils.filter_text(
+            self._title,
+            [
+                '(Official Lyric Video)',
+                'Official Karaoke Video',
+                'Karaoke'
+            ]
+        ).replace('(-)', '').replace('()', '').strip()
+
+    def ensure_is_file(self, path: str | Path):
+        """
+        Check if a path is a file() or not.
+        
+        :raise FileNotFoundError: if not found.
+        """
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"Path Not Exist: {path}")
+
+    def unlink_files(self) -> None:
+        """
+        Method that will unlink existed file generated by this task
+        """
+        path_fields = [
+            '_video_path',
+            '_audio_path',
+            'vocal_path',
+            'instrument_path',
+            'karaoke_path',
+        ]
+        for path_name in path_fields:
+            path: Path | None = getattr(self, path_name)
+            if path is not None and path.is_file():
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception:
+                    self.logger.warning(
+                        "Could not remove temporary file %s for task [%s]",
+                        path, self.id, exc_info=True,
+                    )
+                    # Dont raise here as we dont want it propagate to the
+                    # error_entries.
+
+    # -----------------------
+    # Karaoke Method Process
+    # -----------------------
+
+    def get_video_path(self) -> None:
+        """
+        Method that will download video given by source url into video_path.
+        """
+        from iantirta.media import download_one_video
+    
+        metadata: VideoMetadata = download_one_video(
+            self.source_url, 
+            logger=self.logger
+        )
+        self.logger.debug(f'download finished: metadata: {metadata}')
+
+        self._video_path = metadata.video_path
+
+        if self.duration is not None and self.duration != metadata.duration:
+            self.logger.warning(
+                "Different duration generated by new download, overwriting... "
+                f"{self.duration} -> {metadata.duration}"
+            )
+        self.duration = metadata.duration
+
+        if self.title is None:
+            self.title = metadata.title
+
+        if not self.artist:
+            self.artist = metadata.resolved_artist
+
+        if self.thumbnail_url and self.thumbnail_url != metadata.thumbnail:
+            self.logger.warning(
+                "Metadata thumbnail is different, you can ignore this warning."
+            )
+        self.thumbnail_url = metadata.thumbnail
+
+        del metadata
+
+    def get_lyric(self) -> None:
+        """
+        Method that will get lyrics, it will download video by source.
+        if the necessary title, artist, and duration doesnt exists.
+        
+        THis method will also raise error.
+        """
+        if self.title is None or self.artist is None or self.duration is None:
+            self.get_video_path()
+        
+        from iantirta.media import get_lyric
+    
+        lyric_metadata: LyricMetadata = get_lyric(
+            title=self.title,
+            artist=self.artist,
+            duration=self.duration,
+            logger=self.logger
+        )
+
+        # This will override any from video info by yt dlp
+        # Since the lyric api metadata much more accurate
+        # and reliable.
+        self.title = lyric_metadata.trackName
+        self.artist = lyric_metadata.artistName
+        self._lyric = lyric_metadata.plainLyrics
+
+    def get_audio_path(self, *, lyric: bool = False) -> None:
+        """
+        Combine method downloading lyric and normalize into audio_path.
+        So that this method can be achive inside 1 single network pool download
+
+        :param bool lyric:
+        """
+        if (lyric or self.karaoke_type == 'plus') and self._lyric is None:
+            self.get_lyric()
+
+        audio_path = self.video_path.with_suffix(".wav")
+
+        if not audio_path.is_file():
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-i", str(self.video_path),
+                "-vn", str(audio_path)
+            ], check=True, capture_output=True, text=True,)
+
+            if not audio_path.is_file():
+                raise OSError("Audio Normalization failed.")
+        
+        self._audio_path = audio_path
+
+    def separate_vocal_and_instrument(self, separator_model=None) -> None:
+        """
+        Method for separation process
+        """
+        if self.vocal_path is None:
+            self.vocal_path = self.audio_path.with_name(self.audio_path.stem + "_vocal.wav")
+        
+        if self.instrument_path is None:
+            self.instrument_path = self.audio_path.with_name(self.audio_path.stem + "_instrument.wav")
+
+        if self.vocal_path.is_file() and self.instrument_path.is_file():
+            self.logger.debug(f'Already separated. vocal="{self.vocal_path}", instrument="{self.instrument_path}"')
+            return
+
+        if separator_model is None:
+            raise OSError('separator is not being passed,')
+
+        from iantirta.audio import save_audio
+
+        result: SeparationData = separator_model.separate(
+            self.audio_path,
+            logger=self.logger
+        )
+
+        save_audio(
+            result.vocal,
+            self.vocal_path,
+            samplerate=result.samplerate
+        )
+        save_audio(
+            result.instrument,
+            self.instrument_path,
+            samplerate=result.samplerate
+        )
+
+    def detect_audio_activity(self):
+        """
+        Method that is used to detect audio activity for the audio
+        """
+
+    def transcribe(self, asr_model=None) -> None:
+        """
+        Method that is used to transcribe/asr the audio
+        """
+
+    def align_lyric(self):
+        """
+        Method that is used to align lyric for the audio
+        """
+
+    def force_align(self, fa_model=None) -> None:
+        """
+        Method that is used to force align lyric to audio
+        """
+    
+    def render_karaoke(self):
+        """
+        Method that is used to render karaoke into .mkv multiflex video
+        """
+        if self.karaoke_type == 'plus' and not self.ass_content:
+            raise OSError("Karaoke plus needed ass_content to be rendered.")
+
+        if self.instrument_path is None or not self.instrument_path.is_file():
+            raise OSError(
+                "Cant do rendering when instrument_path is not a file, "
+                "surely you wanted to do separation first."
+            )
+
+        from .rendering_utils import Renderer
+
+        if self.karaoke_path is None:
+            # Calling this will auto download if not exist.
+            self.karaoke_path = self.video_path.with_name(f"{self.artist} - {self.title}.mkv")
+
+        audio_paths = [self.instrument_path]
+        Renderer().render(
+            video_path=self.video_path,
+            audio_paths=audio_paths,
+            duration=self.duration,
+            outpath=self.karaoke_path,
+            ass_content=self.ass_content,
+            logger=self.logger
+        )
+
+    # -----------------------
+    # Lazy property
+    # -----------------------
+
+    @property
+    def title(self) -> str | None:
+        return self._title
+
+    @title.setter
+    def title(self, new_title: str):
+        # Normalize title
+        self._title = new_title
+        self._normalize_title()
+
+    @property
+    def lyric(self) -> str:
+        if self._lyric is None:
+            self.get_lyric()
+        return self._lyric
+
+    @lyric.setter
+    def lyric(self, value: str):
+        self._lyric = value
+
+    @property
+    def video_path(self) -> Path:
+        if self._video_path is None:
+            self.get_video_path()
+        return self._video_path
+
+    @video_path.setter
+    def video_path(self, path: str | Path):
+        self.ensure_is_file(path)
+        self._video_path = Path(path)
+
+    @property
+    def audio_path(self) -> Path:
+        if self._audio_path is None or not self._audio_path.is_file():
+            self.get_audio_path()
+        return self._audio_path
+    
+    @audio_path.setter
+    def audio_path(self, path: str | Path):
+        self.ensure_is_file(path)
+        self._audio_path = Path(path)
+
+    @property
+    def ass_content(self) -> str | None:
+        return None

@@ -1,19 +1,27 @@
 import gc
 import logging
 import threading
-from typing import TypeAlias, Any
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from concurrent.futures import (
     FIRST_COMPLETED,
     Future,
     ThreadPoolExecutor,
     wait,
 )
+from typing import Any, ClassVar, TypeAlias
 
 from iantirta.media import install_deno
 from iantirta.models.load_model import load_model
+
+from iantirta.karaoke.karaoke_task import KaraokeTask
 from iantirta.karaoke.rendering_utils import Renderer
+
+__all__ = [
+    "BatchKaraoke",
+    'KaraokeProcessError',
+]
+
 
 ActiveTaskType: TypeAlias = dict[Future, tuple[str, KaraokeTask]]
 
@@ -56,9 +64,7 @@ class BatchKaraoke:
     while this class manage its behaviour and result.
     """
 
-    _separator_model = None
-    _asr_model = None
-    _fa_model = None
+    karaoke_task_class: ClassVar[type[KaraokeTask]] = KaraokeTask
 
     def __init__(
         self,
@@ -92,6 +98,9 @@ class BatchKaraoke:
         install_deno()
         Renderer.ensure_font_exists()
 
+        # Logging
+        self.logger = (logger or logging.getLogger(__name__))
+
         self.num_pool_network = num_pool_network
         self.num_pool_cpu = num_pool_cpu
         self.num_pool_gpu = num_pool_gpu
@@ -99,6 +108,7 @@ class BatchKaraoke:
         # Karaoke Task Management
         self.total_task = len(tasks)
         self.stage_manager = {
+            'waiting': 0,
             DOWNLOAD_STAGE: 0,
             SEPARATION_STAGE: 0,
             AAD_STAGE: 0,
@@ -114,11 +124,19 @@ class BatchKaraoke:
 
         # Model Management
         self.model_lock = threading.Lock()
+
+        self._separator_model = None
+        self._asr_model = None
+        self._fa_model = None
+        
         self.is_separation_done: bool = False
         self.is_asr_done: bool = False
 
+        self.asr_task: list[KaraokeTask] = []
+        self.fa_task: list[KaraokeTask] = []
+
         self._karaoke_tasks = [
-            KaraokeTask.from_dict(**task)
+            self.karaoke_task_class.from_dict(**task)
             for task in tasks
         ]
         self._failed_tasks: set[int] = set()
@@ -167,6 +185,17 @@ class BatchKaraoke:
                     )
         return self._separator_model
 
+    def cleanup_models(self):
+        """
+        Method that will be called to cleanup models class and instance.
+        that is used by this batch processor
+        """
+        self._separator_model = None
+        self._asr_model = None
+        self._fa_model = None
+
+        self.clear_memory()
+
     def clear_memory(self):
         """
         Collect Python garbage and release unused PyTorch CUDA cache.
@@ -202,7 +231,7 @@ class BatchKaraoke:
             active_task[
                 gpu_pool.submit(
                     task.transcribe,
-                    self.transcriber_model
+                    self.asr_model
                 )
             ] = (ASR_STAGE, task)
 
@@ -259,6 +288,9 @@ class BatchKaraoke:
         """
         self._failed_tasks.add(id(task))
 
+        if not task.error_entries:
+            task.error(stage, e)
+
         # This will only duplicate error log
         # Cause by future not raising error.
         if not isinstance(e, KaraokeProcessError):
@@ -294,9 +326,6 @@ class BatchKaraoke:
         task: KaraokeTask,
         gpu_pool: ThreadPoolExecutor,
         active_task: ActiveTaskType,
-        *,
-        next_task: KaraokeTask | None = None,
-        network_pool: ThreadPoolExecutor | None = None,
     ) -> ActiveTaskType:
         """
         Method that will run after task is downloaded.
@@ -319,16 +348,6 @@ class BatchKaraoke:
             )
         ] = (SEPARATION_STAGE, task)
         self.stage_manager[SEPARATION_STAGE] += 1
-
-        # append next task to the network pool if given
-        if next_task is not None:
-            active_task[
-                network_pool.submit(
-                    next_task.get_audio_path,
-                    lyric=next_task.karaoke_type == "plus"
-                )
-            ] = (DOWNLOAD_STAGE, next_task)
-            self.stage_manager[DOWNLOAD_STAGE] += 1
 
         return active_task
 
@@ -530,10 +549,8 @@ class BatchKaraoke:
         task: KaraokeTask,
         stage: str,
         active_task: ActiveTaskType,
-        download_tasks: deque[KaraokeTask],
         gpu_pool: ThreadPoolExecutor,
         cpu_pool: ThreadPoolExecutor,
-        network_pool: ThreadPoolExecutor,
     ) -> ActiveTaskType:
         """
         Method that will responsible for routing each task stage.
@@ -541,12 +558,12 @@ class BatchKaraoke:
         :param KaraokeTask task:
         :param str stage:
         :param ActiveTaskType active_task:
-        :param deque[KaraokeTask] download_tasks:
         :param ThreadPoolExecutor gpu_pool:
         :param ThreadPoolExecutor cpu_pool:
         :param ThreadPoolExecutor network_pool:
         :return: the shared active task dictionary
-        :rtype: ActiveTaskType"""
+        :rtype: ActiveTaskType
+        """
         # Running this in order so that
         # Python doesnt make unnecessary check.
 
@@ -554,18 +571,10 @@ class BatchKaraoke:
             self.handle_post_error_hook()
 
         elif stage == DOWNLOAD_STAGE:
-            next_task = None
-            try:
-                next_task = download_tasks.popleft()
-            except IndexError:
-                pass
-
             active_task = self.handle_post_download(
                 task=task,
                 gpu_pool=gpu_pool,
                 active_task=active_task,
-                next_task=next_task,
-                network_pool=network_pool
             )
 
         elif stage == SEPARATION_STAGE:
@@ -614,6 +623,44 @@ class BatchKaraoke:
 
         return active_task
 
+    def handle_next_download(
+        self,
+        download_tasks: deque[KaraokeTask],
+        network_pool: ThreadPoolExecutor,
+        active_task: ActiveTaskType
+    ) -> ActiveTaskType:
+        """
+        Method that will handle next download posting to the pool.
+
+        This is outside any error checking of task, so this will run
+        even if the task returns error, while also checking if the
+        ``download_tasks`` still have value left.
+
+        :param ActiveTaskType active_task:
+        :param deque[KaraokeTask] download_tasks:
+        :param ThreadPoolExecutor network_pool:
+        :return: the shared active task dictionary
+        :rtype: ActiveTaskType
+        """
+        next_task = None
+        try:
+            next_task = download_tasks.popleft()
+        except IndexError:
+            pass
+
+        # append next task to the network pool if given
+        if next_task is not None:
+            active_task[
+                network_pool.submit(
+                    next_task.get_audio_path,
+                    lyric=next_task.karaoke_type == "plus"
+                )
+            ] = (DOWNLOAD_STAGE, next_task)
+            self.stage_manager['waiting'] -= 1
+            self.stage_manager[DOWNLOAD_STAGE] += 1
+
+        return active_task
+
     def _handle_completed_future(
         self,
         future: Future,
@@ -643,10 +690,17 @@ class BatchKaraoke:
         stage, task = active_task.pop(future)
         self.stage_manager[stage] -= 1
 
+        if stage == DOWNLOAD_STAGE and download_tasks:
+            active_task = self.handle_next_download(
+                download_tasks=download_tasks,
+                network_pool=network_pool,
+                active_task=active_task
+            )
+
         try:
             future.result()
 
-            if task._error_entries:
+            if task.error_entries:
                 # Raised here so that is run on exception.
                 # sometimes future result doesnt
                 # raise an error.
@@ -665,10 +719,8 @@ class BatchKaraoke:
                 task=task,
                 stage=stage,
                 active_task=active_task,
-                download_tasks=download_tasks,
                 gpu_pool=gpu_pool,
                 cpu_pool=cpu_pool,
-                network_pool=network_pool,
             )
 
         except Exception as e:
@@ -686,12 +738,13 @@ class BatchKaraoke:
             #    * ``SEPARATION_STAGE`` == 0
             if (
                 not self.is_separation_done
+                and self.stage_manager['waiting'] == 0
                 and self.stage_manager[DOWNLOAD_STAGE] == 0
                 and self.stage_manager[SEPARATION_STAGE] == 0
                 and not download_tasks
             ):
                 self.is_separation_done = True
-                self.separator_model = None
+                self._separator_model = None
                 self.clear_memory()
 
                 asr_batch = self.asr_task
@@ -714,7 +767,7 @@ class BatchKaraoke:
                 and self.stage_manager[ASR_STAGE] == 0
             ):
                 self.is_asr_done = True
-                self.transcriber_model = None
+                self._asr_model = None
                 self.clear_memory()
 
                 fa_batch = self.fa_task
@@ -740,108 +793,112 @@ class BatchKaraoke:
         running this batch processor should take into
         account any concurrency bug that would happened.
         """
-        with (
-            ThreadPoolExecutor(
-                max_workers=self.num_pool_network,
-                thread_name_prefix="DownloadPool"
-            ) as network_pool,
-            ThreadPoolExecutor(
-                max_workers=self.num_pool_gpu,
-                thread_name_prefix="GpuPool"
-            ) as gpu_pool,
-            ThreadPoolExecutor(
-                max_workers=self.num_pool_cpu,
-                thread_name_prefix="CpuPool"
-            ) as cpu_pool
-        ):
-            active_task: ActiveTaskType = {}
+        try:
+            with (
+                ThreadPoolExecutor(
+                    max_workers=self.num_pool_network,
+                    thread_name_prefix="DownloadPool"
+                ) as network_pool,
+                ThreadPoolExecutor(
+                    max_workers=self.num_pool_gpu,
+                    thread_name_prefix="GpuPool"
+                ) as gpu_pool,
+                ThreadPoolExecutor(
+                    max_workers=self.num_pool_cpu,
+                    thread_name_prefix="CpuPool"
+                ) as cpu_pool
+            ):
+                active_task: ActiveTaskType = {}
 
-            try:
-                download_tasks = deque(self.karaoke_tasks)
-                active_task = {
-                    network_pool.submit(
-                        task.get_audio_path,
-                        lyric=task.karaoke_type == "plus"
-                    ): (DOWNLOAD_STAGE, task)
-                    for task in [
+                try:
+                    download_tasks = deque(self.karaoke_tasks)
+                    initial_tasks = [
                         download_tasks.popleft()
-                        for _ in range(self.num_pool_network)
+                        for _ in range(min(self.num_pool_network, len(download_tasks)))
                     ]
-                }
+                    active_task = {
+                        network_pool.submit(
+                            task.get_audio_path,
+                            lyric=task.karaoke_type == "plus"
+                        ): (DOWNLOAD_STAGE, task)
+                        for task in initial_tasks
+                    }
+                    self.stage_manager['waiting'] = self.total_task - len(initial_tasks)
+                    self.stage_manager[DOWNLOAD_STAGE] += len(initial_tasks)
 
-                while active_task:
-                    done, _ = wait(active_task, return_when=FIRST_COMPLETED)
+                    while active_task:
+                        done, _ = wait(active_task, return_when=FIRST_COMPLETED)
 
-                    for future in done:
-                        active_task = self._handle_completed_future(
-                            future=future,
-                            active_task=active_task,
-                            download_tasks=download_tasks,
-                            gpu_pool=gpu_pool,
-                            cpu_pool=cpu_pool,
-                            network_pool=network_pool,
+                        for future in done:
+                            active_task = self._handle_completed_future(
+                                future=future,
+                                active_task=active_task,
+                                download_tasks=download_tasks,
+                                gpu_pool=gpu_pool,
+                                cpu_pool=cpu_pool,
+                                network_pool=network_pool,
+                            )
+
+                    # Do validation check once more
+
+                    # This means that either something is still adding into this.
+                    # Or it failed to run.
+                    if self.asr_task or self.fa_task:
+                        raise RuntimeError(
+                            "Scheduler stopped with deferred tasks remaining: "
+                            f"{len(self.asr_task)} transcription, "
+                            f"{len(self.fa_task)} forced-alignment"
                         )
 
-                # Do validation check once more
+                    if sum(self.stage_manager.values()) != self.total_task:
+                        raise RuntimeError(
+                            "Task counter invariant violated: "
+                            f"{sum(self.stage_manager.values())} != {self.total_task}"
+                        )
 
-                # This means that either something is still adding into this.
-                # Or it failed to run.
-                if self.asr_task or self.fa_task:
-                    raise RuntimeError(
-                        "Scheduler stopped with deferred tasks remaining: "
-                        f"{len(self.asr_task)} transcription, "
-                        f"{len(self.fa_task)} forced-alignment"
+                    unfinished = {
+                        stage: count
+                        for stage, count in self.stage_manager.items()
+                        if stage not in ("success", "failed") and count != 0
+                    }
+                    if unfinished:
+                        raise RuntimeError(
+                            f"Scheduler stopped with unfinished stages: {unfinished}"
+                        )
+
+                except KeyboardInterrupt:
+                    self.logger.warning(
+                        "CTRL+C Interrupt received. "
+                        "cancelling pending work."
                     )
 
-                if sum(self.stage_manager.values()) != self.total_task:
-                    raise RuntimeError(
-                        "Task counter invariant violated: "
-                        f"{sum(self.stage_manager.values())} != {self.total_task}"
-                    )
+                    for future in active_task:
+                        future.cancel()
+                        self.logger.warning(f"canceling active futures {future}")
 
-                unfinished = {
-                    stage: count
-                    for stage, count in self.stage_manager.items()
-                    if stage not in ("success", "failed") and count != 0
-                }
-                if unfinished:
-                    raise RuntimeError(
-                        f"Scheduler stopped with unfinished stages: {unfinished}"
-                    )
+                    # Running Python threads cannot be forcibly terminated.
+                    # Executor shutdown waits for running calls to finish.
+                    raise
 
-            except KeyboardInterrupt:
-                self.logger.warning(
-                    "CTRL+C Interrupt received. "
-                    "cancelling pending work."
-                )
+                except Exception as e:
+                    # Handle error on a batch karaoke worker level failure.
+                    # doing it here will not cancel and will wait for any
+                    # future left inside the pool.
+                    for task in self.karaoke_tasks:
+                        if id(task) in self._success_tasks:
+                            continue
 
-                for future in active_task:
-                    future.cancel()
-                    self.logger.warning(f"canceling active futures {future}")
+                        self.handle_task_error(
+                            task=task,
+                            stage='WorkerStage',
+                            e=e,
+                            active_task=active_task
+                        )
 
-                # Running Python threads cannot be forcibly terminated.
-                # Executor shutdown waits for running calls to finish.
-                raise
+                    raise
 
-            except Exception as e:
-                # Handle error on a batch karaoke worker level failure.
-                # doing it here will not cancel and will wait for any
-                # future left inside the pool.
-                for task in self.karaoke_tasks:
-                    if id(task) in self._success_tasks:
-                        continue
-
-                    self.handle_task_error(
-                        task=task,
-                        stage='WorkerStage',
-                        e=e,
-                        active_task=active_task
-                    )
-
-                raise
-
-            finally:
-                self.cleanup_models()
+        finally:
+            self.cleanup_models()
 
         self.logger.info(
             "Batch finished: %d succeeded, %d failed, %d total.",
