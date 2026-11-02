@@ -309,7 +309,7 @@ def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
         print(f"Updating {len(buffer_tasks)} tasks in server...")
         try:
             api.api.make_json_request(
-                'karaoke/task/update',
+                'karaoke/tasks/update',
                 {'tasks': buffer_tasks},
             )
         # except Exception as e:

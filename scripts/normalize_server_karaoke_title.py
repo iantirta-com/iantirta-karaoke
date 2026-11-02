@@ -117,7 +117,7 @@ def normalize_title(
         print(f"Updating {len(buffer_tasks)} tasks in server...")
         try:
             api.api.make_json_request(
-                'karaoke/task/update',
+                'karaoke/tasks/update',
                 {'tasks': buffer_tasks},
             )
         finally:

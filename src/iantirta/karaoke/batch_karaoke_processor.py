@@ -164,11 +164,33 @@ class BatchKaraoke:
 
     @property
     def asr_model(self):
-        pass
+        if self._asr_model is None:
+            with self.model_lock:
+                if self._asr_model is None:
+                    self._asr_model = load_model(
+                        'Qwen/Qwen3-ASR-1.7B-hf',
+                        'asr',
+                        model_type_options={
+                            'max_inference_batch_size': 1,
+                            'num_beams': 4,
+                            'logger': self.logger
+                        }
+                    )
+        return self._asr_model
 
     @property
     def fa_model(self):
-        pass
+        if self._fa_model is None:
+            with self.model_lock:
+                if self._fa_model is None:
+                    self._fa_model = load_model(
+                        'facebook/mms-1b-all',
+                        'ctc_align',
+                        model_type_options={
+                            'logger': self.logger
+                        }
+                    )
+        return self._fa_model
 
     @property
     def separator_model(self):

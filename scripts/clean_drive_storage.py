@@ -46,7 +46,7 @@ def clean_storage(api: KaraokeWorker, tasks: list[dict]):
         print(f"Updating {len(buffer_tasks)} tasks in server (setting download_url = False)...")
         try:
             api.api.make_json_request(
-                'karaoke/task/update',
+                'karaoke/tasks/update',
                 {'tasks': buffer_tasks},
             )
         except Exception as e:
@@ -114,7 +114,7 @@ if __name__ == '__main__':
         ]
     )
     res = api.api.make_json_request(
-        'karaoke/task/update',
+        'karaoke/tasks/update',
         {'tasks': [
             {
                 'id': 12952,
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     #     assert task['download_uris']
     #     task['log_entries'] = []
     # res = api.api.make_json_request(
-    #     'karaoke/task/update',
+    #     'karaoke/tasks/update',
     #     {'tasks': tasks},
     # )
     # print(res)

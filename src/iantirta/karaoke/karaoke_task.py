@@ -335,16 +335,29 @@ class KaraokeTask:
         """
         Method that is used to transcribe/asr the audio
         """
+        asr_model.transcribe(
+            
+        )
 
     def align_lyric(self):
         """
         Method that is used to align lyric for the audio
         """
+        ref_result, new_audio_segments = align2ref(
+            asr_result=self.asr_result,
+            lyric=self.lyric,
+            audio_segments=self.audio_segments,
+        )
 
     def force_align(self, fa_model=None) -> None:
         """
         Method that is used to force align lyric to audio
         """
+        fa_model.align(
+            audio_path=self.audio_path,
+            ref_result=self.ref_result,
+            audio_segments=self.ref_audio_segments,
+        )
     
     def render_karaoke(self):
         """
