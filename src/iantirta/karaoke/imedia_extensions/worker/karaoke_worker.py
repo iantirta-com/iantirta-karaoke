@@ -254,9 +254,7 @@ class KaraokeWorker(IanTirtaAPI):
         }
         payload.update(params or {})
 
-        res = super().make_json_request(
-            'GET', path=path, params={"params": payload},
-        )
+        res = super().make_json_request('GET', path=path, params={"params": payload},)
 
         return res['result']
 
