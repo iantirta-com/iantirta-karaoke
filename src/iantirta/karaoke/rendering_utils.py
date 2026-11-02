@@ -1,4 +1,5 @@
-
+# Part of Iantirta.com
+# See LICENSE file for full copyright and licensing details.
 
 import logging
 import os
@@ -9,6 +10,11 @@ import zipfile
 from pathlib import Path
 
 from iantirta.media._http._http import BaseHTTP
+
+__all__ = [
+    "Renderer"
+]
+
 
 _logger = logging.getLogger(__name__)
 

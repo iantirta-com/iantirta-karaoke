@@ -1,3 +1,5 @@
+# Part of Iantirta.com
+# See LICENSE file for full copyright and licensing details.
 
 """
 Karaoke Pipelines in essence is:
@@ -10,3 +12,23 @@ Karaoke Pipelines in essence is:
 - Force Alignment
 - Rendered.
 """
+
+from typing import TYPE_CHECKING
+
+from iantirta.lazy_import import LazyModule, define_import_structure
+
+if TYPE_CHECKING:
+    from .batch_karaoke_processor import *
+    from .imedia_extensions import *
+    from .karaoke_task import *
+    from .rendering_utils import *
+else:
+    import sys
+    
+    _file = globals()["__file__"]
+    sys.modules[__name__] = LazyModule(
+        __name__,
+        _file,
+        define_import_structure(_file),
+        module_spec=__spec__,
+    )
