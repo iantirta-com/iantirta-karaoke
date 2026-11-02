@@ -29,6 +29,7 @@ ActiveTaskType: TypeAlias = dict[Future, tuple[str, KaraokeTask]]
 # Stage Representation
 # --------------------
 
+WAITING_STAGE = 'waiting'
 DOWNLOAD_STAGE = 'download'
 SEPARATION_STAGE = 'separate'
 AAD_STAGE = 'detect_audio'
@@ -108,7 +109,7 @@ class BatchKaraoke:
         # Karaoke Task Management
         self.total_task = len(tasks)
         self.stage_manager = {
-            'waiting': 0,
+            WAITING_STAGE: self.total_task,
             DOWNLOAD_STAGE: 0,
             SEPARATION_STAGE: 0,
             AAD_STAGE: 0,
@@ -642,22 +643,19 @@ class BatchKaraoke:
         :return: the shared active task dictionary
         :rtype: ActiveTaskType
         """
-        next_task = None
-        try:
-            next_task = download_tasks.popleft()
-        except IndexError:
-            pass
+        if not download_tasks:
+            return active_task
 
-        # append next task to the network pool if given
-        if next_task is not None:
-            active_task[
-                network_pool.submit(
-                    next_task.get_audio_path,
-                    lyric=next_task.karaoke_type == "plus"
-                )
-            ] = (DOWNLOAD_STAGE, next_task)
-            self.stage_manager['waiting'] -= 1
-            self.stage_manager[DOWNLOAD_STAGE] += 1
+        next_task = download_tasks.popleft()
+
+        active_task[
+            network_pool.submit(
+                next_task.get_audio_path,
+                lyric=next_task.karaoke_type == "plus"
+            )
+        ] = (DOWNLOAD_STAGE, next_task)
+        self.stage_manager[WAITING_STAGE] -= 1
+        self.stage_manager[DOWNLOAD_STAGE] += 1
 
         return active_task
 
@@ -738,7 +736,7 @@ class BatchKaraoke:
             #    * ``SEPARATION_STAGE`` == 0
             if (
                 not self.is_separation_done
-                and self.stage_manager['waiting'] == 0
+                and self.stage_manager[WAITING_STAGE] == 0
                 and self.stage_manager[DOWNLOAD_STAGE] == 0
                 and self.stage_manager[SEPARATION_STAGE] == 0
                 and not download_tasks
@@ -780,6 +778,7 @@ class BatchKaraoke:
 
             # Each task must always be represented by exactly one
             # stage, success, or failure counter.
+            assert self.stage_manager[WAITING_STAGE] == len(download_tasks)
             assert sum(self.stage_manager.values()) == self.total_task
 
         return active_task
@@ -809,22 +808,14 @@ class BatchKaraoke:
                 ) as cpu_pool
             ):
                 active_task: ActiveTaskType = {}
-
+                download_tasks = deque(self.karaoke_tasks)
                 try:
-                    download_tasks = deque(self.karaoke_tasks)
-                    initial_tasks = [
-                        download_tasks.popleft()
-                        for _ in range(min(self.num_pool_network, len(download_tasks)))
-                    ]
-                    active_task = {
-                        network_pool.submit(
-                            task.get_audio_path,
-                            lyric=task.karaoke_type == "plus"
-                        ): (DOWNLOAD_STAGE, task)
-                        for task in initial_tasks
-                    }
-                    self.stage_manager['waiting'] = self.total_task - len(initial_tasks)
-                    self.stage_manager[DOWNLOAD_STAGE] += len(initial_tasks)
+                    for _ in range(min(self.num_pool_network, len(download_tasks))):
+                        active_task = self.handle_next_download(
+                            download_tasks=download_tasks,
+                            network_pool=network_pool,
+                            active_task=active_task
+                        )
 
                     while active_task:
                         done, _ = wait(active_task, return_when=FIRST_COMPLETED)
