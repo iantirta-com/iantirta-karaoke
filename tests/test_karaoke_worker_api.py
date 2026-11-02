@@ -212,7 +212,7 @@ def test_flushes_on_batch_size(
 
         requests = api_request.call_args_list
         assert all(
-            args.args[0] == "karaoke/task/update"
+            args.args[0] == "karaoke/tasks/update"
             for args in requests
         )
 
@@ -366,7 +366,7 @@ def test_flush_storage_failure_marks_tasks_as_errors(
         api_request.assert_called_once()
         request = api_request.call_args
 
-        assert request.args[0] == "karaoke/task/update"
+        assert request.args[0] == "karaoke/tasks/update"
 
         posted_tasks = request.args[1]["tasks"]
         assert len(posted_tasks) == len(karaoke_tasks)

@@ -6,6 +6,8 @@ from iantirta.karaoke.imedia_extensions.worker.karaoke_worker import (
     _Sentinel,
 )
 
+__all__ = ["ClientKaraokeWorker"]
+
 
 class ClientKaraokeWorker(KaraokeWorker):
     """
@@ -28,8 +30,58 @@ class ClientKaraokeWorker(KaraokeWorker):
         if not self.claim_task_domain:
             self.claim_task_domain = [('status', '=', 'waiting')]
 
-        # Override it back
-        self.make_json_request = IanTirtaAPI.make_json_request
+    # --------
+    # Helper api communication method
+    # --------
+
+    def make_json_request(
+        self,
+        method: str = 'GET',
+        path: str = '',
+        params: dict | None = None,
+    ):
+        return IanTirtaAPI.make_json_request(
+            self,
+            method=method,
+            path=path,
+            params=params,
+        )
+
+    # --------
+    # Api communication method
+    # --------
+
+    def worker_claim_task(self, tasks):
+        """
+        Method that makes api call to the server.
+        Indicating that the tasks will be processed by this client.
+
+        This function exists because of how different
+        api call to ``karaoke/tasks/get`` can be processed.
+        it would not always be processed by the same worker instance
+        or any other cases.
+
+        :param list[dict[str, Any]] tasks:
+        """
+        return self.make_json_request(
+            'POST',
+            '/json/2/karaoke.karaoke/write',
+            {
+                'ids': [
+                    task['id']
+                    for task in tasks
+                ],
+                'vals': {
+                    'status': 'processing',
+                }
+            }
+        )
+
+    def worker_start(self):
+        self.logger.info("Starting client karaoke worker")
+
+    def worker_stop(self):
+        self.logger.info("Stopping client karaoke worker")
 
     def claim_tasks(self, domain = _Sentinel, limit = _Sentinel):
         """
@@ -58,6 +110,9 @@ class ClientKaraokeWorker(KaraokeWorker):
             }
         )
 
+        if not karaoke_ids:
+            return []
+
         return self.make_json_request(
             'POST',
             '/json/2/karaoke.karaoke/read',
@@ -73,4 +128,27 @@ class ClientKaraokeWorker(KaraokeWorker):
                     'karaoke_type'
                 ]
             }
+        )
+
+    def post_tasks(self, tasks):
+        """
+        Method that makes api call to the server endpoint
+        for updating karaoke task data.
+
+        :param list[KaraokeTask] tasks:
+        """
+        if not tasks:
+            return
+
+        self.logger.debug(
+            f"Flushing buffer data to server, length={len(tasks)}..."
+        )
+
+        return self.make_json_request(
+            'POST',
+            '/json/2/karaoke.karaoke/client_post_tasks',
+            {'tasks': [
+                task.to_dict()
+                for task in tasks
+            ]},
         )

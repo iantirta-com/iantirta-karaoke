@@ -348,7 +348,7 @@ class KaraokeWorker(IanTirtaAPI):
         )
 
         return self.make_json_request(
-            'karaoke/task/update',
+            'karaoke/tasks/update',
             {'tasks': [
                 task.to_dict()
                 for task in tasks

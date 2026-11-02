@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from iantirta.lazy_import import LazyModule, define_import_structure
 
 if TYPE_CHECKING:
+    from .client import *
     from .worker import *
 else:
     import sys
