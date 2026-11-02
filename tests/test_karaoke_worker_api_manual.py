@@ -14,7 +14,7 @@ def karaoke_worker():
     return KaraokeWorker(
         api_url="http://localhost:8069",
         api_token=os.environ['IANTIRTA_WORKER_API_TOKEN'],
-        worker_id=1,
+        worker_id=9,
         storage_options={
             'provider': 'hf_dataset',
             'access_token': None,
@@ -141,5 +141,6 @@ def test_worker_all(karaoke_worker):
 
 
 if __name__ == "__main__":
+    print(os.environ['IANTIRTA_WORKER_API_TOKEN'])
     import sys
     sys.exit(pytest.main(['-v', '-s', __file__]))
