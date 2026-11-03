@@ -336,7 +336,10 @@ class KaraokeTask:
         Method that is used to transcribe/asr the audio
         """
         asr_model.transcribe(
-            
+            audio_path=self.audio_path,
+            audio_segments=self.audio_segments,
+            reference=self.lyric,
+            language=None,
         )
 
     def align_lyric(self):
@@ -358,7 +361,7 @@ class KaraokeTask:
             ref_result=self.ref_result,
             audio_segments=self.ref_audio_segments,
         )
-    
+
     def render_karaoke(self):
         """
         Method that is used to render karaoke into .mkv multiflex video
