@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from iantirta.media import LyricMetadata, VideoMetadata
-    from iantirta.models.audio_separation import SeparationData
+    from iantirta.models import SeparationResult, BaseASRModelMixin, AudioSeparationModel, ASRResult
+    from iantirta.audio import AudioSegment
 
 
 __all__ = [
@@ -66,6 +67,10 @@ class KaraokeTask:
     error_entries: list[tuple] = field(repr=False, default_factory=list)
     log_entries: list[str] = field(repr=False, default_factory=list)
     logger: logging.Logger | None = None
+
+    # Plus Property
+    _audio_segments: list[AudioSegment] | None = None
+    _asr_result: ASRResult | None = None
 
     _PATH_FIELDS = (
         '_video_path',
@@ -291,7 +296,7 @@ class KaraokeTask:
         
         self._audio_path = audio_path
 
-    def separate_vocal_and_instrument(self, separator_model=None) -> None:
+    def separate_vocal_and_instrument(self, separator_model: AudioSeparationModel | None = None) -> None:
         """
         Method for separation process
         """
@@ -310,7 +315,7 @@ class KaraokeTask:
 
         from iantirta.audio import save_audio
 
-        result: SeparationData = separator_model.separate(
+        result: SeparationResult = separator_model.separate(
             self.audio_path,
             logger=self.logger
         )
@@ -330,16 +335,24 @@ class KaraokeTask:
         """
         Method that is used to detect audio activity for the audio
         """
+        from iantirta.audio import detect_audio_activity, AudioExtraction
 
-    def transcribe(self, asr_model=None) -> None:
+        aad_metadata: AudioExtraction = detect_audio_activity(self.audio_path)
+        self._audio_segments = aad_metadata.segments
+
+    def transcribe(self, asr_model: BaseASRModelMixin | None = None) -> None:
         """
         Method that is used to transcribe/asr the audio
         """
-        asr_model.transcribe(
+        if self._asr_result:
+            self.logger.debug('Already transcribed')
+            return
+
+        self._asr_result = asr_model.transcribe(
             audio_path=self.audio_path,
             audio_segments=self.audio_segments,
-            reference=self.lyric,
-            language=None,
+            references=self.lyric,
+            languages=None,
         )
 
     def align_lyric(self):
@@ -352,7 +365,7 @@ class KaraokeTask:
             audio_segments=self.audio_segments,
         )
 
-    def force_align(self, fa_model=None) -> None:
+    def force_align(self, fa_model: BaseASRModelMixin | None = None) -> None:
         """
         Method that is used to force align lyric to audio
         """
@@ -437,6 +450,22 @@ class KaraokeTask:
         self.ensure_is_file(path)
         self._audio_path = Path(path)
 
+    # -----------------------
+    # Plus Lazy property
+    # -----------------------
+
     @property
     def ass_content(self) -> str | None:
         return None
+
+    @property
+    def audio_segments(self) -> list[AudioSegment]:
+        if self._audio_segments is None:
+            self.detect_audio_activity()
+        return self._audio_segments
+
+    @property
+    def asr_result(self) -> ASRResult:
+        if self._asr_result is None:
+            self.transcribe()
+        return self._asr_result
