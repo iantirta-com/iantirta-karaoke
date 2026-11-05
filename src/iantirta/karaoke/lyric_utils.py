@@ -20,12 +20,12 @@ def timing_overlap(
 def ref2lyric(
     hypothesis: ASRResult,
     lyric: str
-)-> list[WordTiming]:
+) -> list[WordTiming]:
     """
     Aligns ASR hypothesis words to the reference lyric using Needleman-Wunsch.
     """
     from iantirta.text import align, normalize
-    
+
     lyric_words = [
         (word, norm)
         for line in lyric.splitlines()
@@ -120,5 +120,3 @@ def align2ref(
         start_gap = ref_tokens[min(token_ids)].start - aseg.start
         end_gap = aseg.end - ref_tokens[max(token_ids)].end
         unused_audio_gaps[i] = (start_gap, end_gap)
-
-    
