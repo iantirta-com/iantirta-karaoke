@@ -11,9 +11,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from iantirta.media import LyricMetadata, VideoMetadata
-    from iantirta.models import SeparationResult, BaseASRModelMixin, AudioSeparationModel, ASRResult
     from iantirta.audio import AudioSegment
+    from iantirta.media import LyricMetadata, VideoMetadata
+    from iantirta.models import (
+        ASRResult,
+        AudioSeparationModel,
+        BaseASRModelMixin,
+        SeparationResult,
+    )
 
 
 __all__ = [
@@ -323,19 +328,21 @@ class KaraokeTask:
         save_audio(
             result.vocal,
             self.vocal_path,
-            samplerate=result.samplerate
+            samplerate=result.samplerate,
+            as_float=True
         )
         save_audio(
             result.instrument,
             self.instrument_path,
-            samplerate=result.samplerate
+            samplerate=result.samplerate,
+            as_float=True
         )
 
     def detect_audio_activity(self):
         """
         Method that is used to detect audio activity for the audio
         """
-        from iantirta.audio import detect_audio_activity, AudioExtraction
+        from iantirta.audio import AudioExtraction, detect_audio_activity
 
         aad_metadata: AudioExtraction = detect_audio_activity(self.audio_path)
         self._audio_segments = aad_metadata.segments
