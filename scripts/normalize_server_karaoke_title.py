@@ -1,9 +1,10 @@
 import os
-import requests
 import re
 import unicodedata
 
-from iantirta.karaoke.api.karaoke_iantirta_worker import KaraokeWorker
+import requests
+
+from iantirta.karaoke import ClientKaraokeWorker
 
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 _WHITESPACE = re.compile(r"\s+")
@@ -36,7 +37,7 @@ def get_karaoke_tasks():
 
     res_read = requests.post(f'{base_domain}/karaoke.karaoke/read', headers=headers, json={
         'ids': ids,
-        'fields': ['status', 'title', 'artist', 'download_url', 'download_uris']
+        'fields': ['status', 'title', 'artist', 'download_uris']
     })
     res_read.raise_for_status()
     tasks = res_read.json()
@@ -84,7 +85,7 @@ def _normalize_title(title: str) -> str:
     return title or "untitled"
     
 def normalize_title(
-    api: KaraokeWorker,
+    api: ClientKaraokeWorker,
     *,
     dry_run: bool = False
 ):
@@ -133,14 +134,18 @@ def normalize_title(
     _flush()
 
 if __name__ == "__main__":
-    api = KaraokeWorker(
-        api_url="https://karaoke.iantirta.com",
-        api_token=os.environ['IANTIRTA_WORKER_API_TOKEN'],
-        worker_id=1,
+    import logging
+
+    from iantirta.telemetry import netsvc
+    netsvc.setup_logger(__name__, default_level=logging.DEBUG)
+
+    api = ClientKaraokeWorker(
+        endpoint="https://karaoke.iantirta.com",
+        access_token=os.environ['IANTIRTA_KARAOKE_API_TOKEN'],
         storage_options={
             'provider': 'hf_dataset',
             'access_token': os.environ['IANTIRTA_HF_TOKEN'],
             'repo_id': os.environ['IANTIRTA_HF_DATASET_REPO_ID'],
         },
     )
-    normalize_title(api, dry_run=False)
+    normalize_title(api, dry_run=True)
