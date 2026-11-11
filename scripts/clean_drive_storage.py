@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from googleapiclient.errors import HttpError
 
-from iantirta.karaoke.api.karaoke_iantirta_worker import KaraokeWorker
+from iantirta.karaoke import ClientKaraokeWorker
 
 iantirta_api_token = os.environ['IANTIRTA_KARAOKE_API_TOKEN']
 base_domain = 'https://karaoke.iantirta.com/json/2'
@@ -32,8 +32,8 @@ def get_karaoke_tasks():
     return tasks
 
 
-def clean_storage(api: KaraokeWorker, tasks: list[dict]):
-    storage_api = api.storage_api
+def clean_storage(api: ClientKaraokeWorker, tasks: list[dict]):
+    storage_api = api.storage
     print("Connected to Google Drive API.")
 
     buffer_tasks = []
@@ -95,11 +95,10 @@ def clean_storage(api: KaraokeWorker, tasks: list[dict]):
 
 
 if __name__ == '__main__':
-    api = KaraokeWorker(
-        # api_url="https://karaoke.iantirta.com",
-        api_url='https://localhost:8069',
-        api_token=os.environ['IANTIRTA_WORKER_API_TOKEN'],
-        worker_id=1,
+    api = ClientKaraokeWorker(
+        # endpoint="https://karaoke.iantirta.com",
+        endpoint='https://localhost:8069',
+        api_token=os.environ['IANTIRTA_KARAOKE_API_TOKEN'],
         storage_options={
             'provider': 'gdrive',
             'access_token': os.environ['IANTIRTA_DRIVE_USER_TOKEN'],
@@ -113,7 +112,7 @@ if __name__ == '__main__':
             ('download_url', '!=', False)
         ]
     )
-    res = api.api.make_json_request(
+    res = api.make_json_request(
         'karaoke/tasks/update',
         {'tasks': [
             {

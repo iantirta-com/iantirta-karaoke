@@ -1,14 +1,13 @@
 import os
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
-from googleapiclient.errors import HttpError
 from huggingface_hub import (
     CommitOperationCopy,
     CommitOperationDelete,
 )
 
-from iantirta.karaoke.api.karaoke_iantirta_worker import KaraokeWorker
+from iantirta.karaoke import ClientKaraokeWorker
 
 iantirta_api_token = os.environ['IANTIRTA_KARAOKE_API_TOKEN']
 base_domain = 'https://karaoke.iantirta.com/json/2'
@@ -39,14 +38,14 @@ def get_karaoke_tasks():
 
 
 def migrate_new_prefix_hf_storage(
-    api: KaraokeWorker,
+    api: ClientKaraokeWorker,
     *,
     files=None,
     dry_run: bool = False
 ):
     if not files:
-        files = set(api.storage_api._api.list_repo_files(
-            repo_id=api.storage_api.repo_id,
+        files = set(api.storage.client.list_repo_files(
+            repo_id=api.storage.repo_id,
             repo_type='dataset'
         ))
     legacy_files = sorted(
@@ -105,10 +104,10 @@ def migrate_new_prefix_hf_storage(
                 ),
             ])
 
-        api.storage_api._api.create_commit(
-            repo_id=api.storage_api.repo_id,
+        api.storage.client.create_commit(
+            repo_id=api.storage.repo_id,
             repo_type='dataset',
-            token=api.storage_api.access_token,
+            token=api.storage.access_token,
             operations=operations,
             commit_message=(
                 f"Migrate files to two-character shard directories "
@@ -122,14 +121,14 @@ def migrate_new_prefix_hf_storage(
 
 
 def delete_old_without_prefix_hf_storage(
-    api: KaraokeWorker,
+    api: ClientKaraokeWorker,
     *,
     files=None,
     dry_run: bool = False
 ):
     if not files:
-        files = set(api.storage_api._api.list_repo_files(
-            repo_id=api.storage_api.repo_id,
+        files = set(api.storage.client.list_repo_files(
+            repo_id=api.storage.repo_id,
             repo_type='dataset'
         ))
     legacy_files = sorted(
@@ -179,10 +178,10 @@ def delete_old_without_prefix_hf_storage(
                 ),
             ])
 
-        api.storage_api._api.create_commit(
-            repo_id=api.storage_api.repo_id,
+        api.storage.client.create_commit(
+            repo_id=api.storage.repo_id,
             repo_type='dataset',
-            token=api.storage_api.access_token,
+            token=api.storage.access_token,
             operations=operations,
             commit_message=(
                 f"Deleted files because of duplicating with new prefix "
@@ -196,7 +195,7 @@ def delete_old_without_prefix_hf_storage(
 
 
 def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
-    api: KaraokeWorker,
+    api: ClientKaraokeWorker,
     *,
     files=None,
     dry_run: bool = False,
@@ -253,7 +252,7 @@ def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
                     conflicts.append((task, 'path is not a huggingface repo dataset'))
                     break
 
-                path = decoded[len(f'datasets/{api.storage_api.repo_id.lstrip("/")}/resolve/main/'):]
+                path = decoded[len(f'datasets/{api.storage.repo_id.lstrip("/")}/resolve/main/'):]
                 parts = path.split('/')
                 new_path = path
                 if len(parts) <= 3:
@@ -308,7 +307,7 @@ def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
 
         print(f"Updating {len(buffer_tasks)} tasks in server...")
         try:
-            api.api.make_json_request(
+            api.make_json_request(
                 'karaoke/tasks/update',
                 {'tasks': buffer_tasks},
             )
@@ -324,7 +323,7 @@ def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
         updated_files = []
         for file in new_files:
             if not file.startswith('http'):
-                file = api.storage_api.download_endpoint + file
+                file = api.storage.download_endpoint + file
             updated_files.append(file)
         task['download_uris']['files'] = updated_files
         task['status'] = 'completed'
@@ -351,19 +350,18 @@ def update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
 
 BATCH_SIZE = 100
 if __name__ == "__main__":
-    api = KaraokeWorker(
-        api_url="https://karaoke.iantirta.com",
-        api_token=os.environ['IANTIRTA_WORKER_API_TOKEN'],
-        worker_id=1,
+    api = ClientKaraokeWorker(
+        endpoint="https://karaoke.iantirta.com",
+        access_token=os.environ['IANTIRTA_KARAOKE_API_TOKEN'],
         storage_options={
             'provider': 'hf_dataset',
             'access_token': os.environ['IANTIRTA_HF_TOKEN'],
             'repo_id': os.environ['IANTIRTA_HF_DATASET_REPO_ID'],
         },
     )
-    
-    files = set(api.storage_api._api.list_repo_files(
-        repo_id=api.storage_api.repo_id,
+
+    files = set(api.storage.client.list_repo_files(
+        repo_id=api.storage.repo_id,
         repo_type='dataset'
     ))
     migrate_new_prefix_hf_storage(api, files=files, dry_run=True)
@@ -371,5 +369,5 @@ if __name__ == "__main__":
     update_server_karaoke_to_use_prefix_and_clean_up_if_not_exists(
         api,
         files=files,
-        dry_run=False
+        dry_run=True
     )
