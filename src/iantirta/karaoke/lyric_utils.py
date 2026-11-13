@@ -41,7 +41,7 @@ def ref2lyric(
         for w in text.words
         if (norm := normalize(w.clean, kaldi=True).strip())
     ]
-    clean_hypothesis = [norm for _, norm in valid_hyp_words]
+    clean_hypothesis = [norm for _, norm, _ in valid_hyp_words]
 
     alignments = align(
         clean_lyric_words,
