@@ -350,6 +350,11 @@ class KaraokeTask:
         aad_metadata: AudioExtraction = detect_audio_activity(self.audio_path)
         self._audio_segments = aad_metadata.segments
 
+        self.logger.debug(
+            "detect_audio_activity completed with segment: "
+            f'{self._audio_segments}'
+        )
+
     def transcribe(self, asr_model: BaseASRModelMixin | None = None) -> None:
         """
         Method that is used to transcribe/asr the audio
@@ -363,6 +368,11 @@ class KaraokeTask:
             audio_segments=self.audio_segments,
             references=self.lyric,
             languages=None,
+        )
+
+        self.logger.debug(
+            "transcribe completed with result: %r",
+            self._asr_result
         )
 
     def align_lyric(self):
@@ -379,6 +389,10 @@ class KaraokeTask:
         self._ref_result = ref_result
         self._ref_audio_segments = new_audio_segments
 
+        self.logger.debug(
+            "align_lyric completed with result: %r and new audio segment: %s",
+            self._ref_result, self._ref_audio_segments
+        )
 
     def force_align(self, fa_model: BaseASRModelMixin | None = None) -> None:
         """
@@ -389,6 +403,11 @@ class KaraokeTask:
             hypothesis=self.ref_result.texts,
             audio_segments=self.ref_audio_segments,
             languages=[text.language for text in self.ref_result.texts]
+        )
+
+        self.logger.debug(
+            "force_align completed with result: %r",
+            self._fa_result
         )
 
     def render_karaoke(self):
@@ -409,6 +428,12 @@ class KaraokeTask:
         if self.karaoke_path is None:
             # Calling this will auto download if not exist.
             self.karaoke_path = self.video_path.with_name(f"{self.artist} - {self.title}.mkv")
+
+        if self.karaoke_type == "plus":
+            self.logger.debug(
+                "Rendering karaoke plus with ass content: %s",
+                self.ass_content
+            )
 
         audio_paths = [self.instrument_path]
         Renderer().render(
