@@ -372,7 +372,7 @@ class KaraokeTask:
         from .lyric_utils import align2ref
 
         ref_result, new_audio_segments = align2ref(
-            asr_result=self.asr_result,
+            hypothesis=self.asr_result,
             lyric=self.lyric,
             audio_segments=self.audio_segments,
         )
