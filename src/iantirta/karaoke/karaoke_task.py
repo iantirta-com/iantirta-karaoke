@@ -388,6 +388,7 @@ class KaraokeTask:
             audio_path=self.audio_path,
             hypothesis=self.ref_result.texts,
             audio_segments=self.ref_audio_segments,
+            languages=[text.language for text in self.ref_result.texts]
         )
 
     def render_karaoke(self):
