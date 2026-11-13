@@ -287,7 +287,7 @@ class KaraokeTask:
 
         :param bool lyric:
         """
-        if (lyric or self.karaoke_type == 'plus') and self._lyric is None:
+        if (lyric or self.karaoke_type == 'plus') and not self._lyric:
             self.get_lyric()
 
         audio_path = self.video_path.with_suffix(".wav")
