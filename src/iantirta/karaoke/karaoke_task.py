@@ -386,7 +386,7 @@ class KaraokeTask:
         """
         self._fa_result = fa_model.align(
             audio_path=self.audio_path,
-            ref_result=self.ref_result,
+            hypothesis=self.ref_result.texts,
             audio_segments=self.ref_audio_segments,
         )
 
