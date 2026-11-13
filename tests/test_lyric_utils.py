@@ -1,8 +1,8 @@
 
 import pytest
-
 from iantirta.audio import AudioSegment
 from iantirta.models import WordTiming
+
 from iantirta.karaoke.lyric_utils import timing_overlap
 
 
@@ -18,7 +18,9 @@ from iantirta.karaoke.lyric_utils import timing_overlap
         # Right overlap
         ((2.0, 2.5), (2.2, 2.9), True),
         # Equal
-        ((2.0, 3.0), (2.0, 3.0), True)
+        ((2.0, 3.0), (2.0, 3.0), True),
+        # Out
+        ((2.0, 2.99), (3.0, 4.0), False),
     ]
 )
 def test_timing_overlap(aseg, word, expected):

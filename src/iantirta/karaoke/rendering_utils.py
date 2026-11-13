@@ -4,12 +4,10 @@
 import logging
 import os
 import subprocess
-import sys
 import tempfile
 import zipfile
 from pathlib import Path
-
-from iantirta.media._http._http import BaseHTTP
+from typing import ClassVar
 
 __all__ = [
     "Renderer"
@@ -21,11 +19,30 @@ _logger = logging.getLogger(__name__)
 class Renderer:
     _default_render_dir: Path = Path("~/.cache/iantirta/render").expanduser().resolve()
 
+    ASS_STYLE: ClassVar[list[str]] = [
+        "Style: Lat_Duet,Montserrat Bold,120,&H0000A5FF&,&H00FFFFFF&,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,10,10,60,1",
+        "Style: CJK_Duet,Noto Sans CJK SC,120,&H0000A5FF&,&H00FFFFFF&,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,10,10,60,1",
+    ]
+    ASS_HEADER: ClassVar[str] =  (
+        "[Script Info]\n"
+        "Title: KaraokePlus+\nScriptType: v4.00+\n"
+        "PlayResX: 1920\nPlayResY: 1080\nScaledBorderAndShadow: yes\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, "
+        "SecondaryColour, OutlineColour, BackColour, Bold, "
+        "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
+        "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"{chr(10).join(ASS_STYLE)}" + "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+
     def __init__(self):
         self.ensure_font_exists()
 
     @staticmethod
     def ensure_font_exists():
+        from iantirta.media._http._http import BaseHTTP
         # TODO: On windows need font manual installation.
         if os.name != "nt":
             # font_dir = Path("/usr/share/fonts/truetype") # os level

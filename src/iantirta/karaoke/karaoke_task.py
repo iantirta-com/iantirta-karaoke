@@ -76,6 +76,9 @@ class KaraokeTask:
     # Plus Property
     _audio_segments: list[AudioSegment] | None = None
     _asr_result: ASRResult | None = None
+    _ref_result: ASRResult | None = None
+    _ref_audio_segments: list[AudioSegment] | None = None
+    _fa_result: ASRResult | None = None
 
     _PATH_FIELDS = (
         '_video_path',
@@ -366,17 +369,22 @@ class KaraokeTask:
         """
         Method that is used to align lyric for the audio
         """
+        from .lyric_utils import align2ref
+
         ref_result, new_audio_segments = align2ref(
             asr_result=self.asr_result,
             lyric=self.lyric,
             audio_segments=self.audio_segments,
         )
+        self._ref_result = ref_result
+        self._ref_audio_segments = new_audio_segments
+
 
     def force_align(self, fa_model: BaseASRModelMixin | None = None) -> None:
         """
         Method that is used to force align lyric to audio
         """
-        fa_model.align(
+        self._fa_result = fa_model.align(
             audio_path=self.audio_path,
             ref_result=self.ref_result,
             audio_segments=self.ref_audio_segments,
@@ -463,7 +471,24 @@ class KaraokeTask:
 
     @property
     def ass_content(self) -> str | None:
-        return None
+        if self.karaoke_type == "basic":
+            return None
+
+        from .rendering_utils import Renderer
+
+        (
+            self.fa_result
+            .to_line_idx(self.lyric)
+            .populate_ass()
+        )
+
+        return (
+            Renderer.ASS_HEADER +
+            "\n".join(
+                text.ass_event
+                for text in self.fa_result.texts
+            )
+        )
 
     @property
     def audio_segments(self) -> list[AudioSegment]:
@@ -476,3 +501,21 @@ class KaraokeTask:
         if self._asr_result is None:
             self.transcribe()
         return self._asr_result
+
+    @property
+    def ref_result(self) -> ASRResult:
+        if self._ref_result is None:
+            self.align_lyric()
+        return self._ref_result
+
+    @property
+    def ref_audio_segments(self) -> list[AudioSegment]:
+        if self._ref_audio_segments is None:
+            self.align_lyric()
+        return self._ref_audio_segments
+
+    @property
+    def fa_result(self) -> ASRResult:
+        if self._fa_result is None:
+            self.force_align()
+        return self._fa_result
