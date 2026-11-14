@@ -364,7 +364,7 @@ class KaraokeTask:
             return
 
         self._asr_result = asr_model.transcribe(
-            audio_path=self.audio_path,
+            audio_path=self.vocal_path,
             audio_segments=self.audio_segments,
             references=self.lyric,
             languages=None,
@@ -399,7 +399,7 @@ class KaraokeTask:
         Method that is used to force align lyric to audio
         """
         self._fa_result = fa_model.align(
-            audio_path=self.audio_path,
+            audio_path=self.vocal_path,
             hypothesis=self.ref_result.texts,
             audio_segments=self.ref_audio_segments,
             languages=[text.language for text in self.ref_result.texts]
