@@ -301,7 +301,7 @@ class KaraokeTask:
 
             if not audio_path.is_file():
                 raise OSError("Audio Normalization failed.")
-        
+
         self._audio_path = audio_path
 
     def separate_vocal_and_instrument(self, separator_model: AudioSeparationModel | None = None) -> None:
