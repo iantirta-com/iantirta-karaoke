@@ -39,10 +39,25 @@ def ref2lyric(
         (w, norm, text.language)
         for text in hypothesis.texts
         for w in text.words
-        if (norm := normalize(w.clean, kaldi=True).strip())
+        if w.score > 0.1
+        and (norm := normalize(w.clean, kaldi=True).strip())
     ]
     clean_hypothesis = [norm for _, norm, _ in valid_hyp_words]
 
+    from sequence_align.pairwise import needleman_wunsch_with_scores as nwws
+
+    def mwws_score(a:str, b: str) -> float:
+        if a == b:
+            return 2.0 # Match exactly
+        if similarity(a, b) > 0.6:
+            return 1.0
+        return -3.0
+    
+    refs, hyps = nwws(
+        ref_tokens.cleans, hyp_tokens.cleans,
+        gap="-", score_fn=mwws_score,
+        indel_score=-1
+    )
     alignments = align(
         clean_lyric_words,
         clean_hypothesis
