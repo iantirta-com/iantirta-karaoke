@@ -2366,6 +2366,7 @@ def test_compare_align_lyric(transcribe_res, indo_lyric, audio_segments):
 
     for text, ktext in zip(ref_result.texts, kplus_ref_result.texts):
         assert text.end == ktext.end
+        assert text.start == ktext.start
         assert text_utils.normalize(
             text.text,
             punctuation=True,
