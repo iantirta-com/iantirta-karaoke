@@ -347,7 +347,7 @@ class KaraokeTask:
         """
         from iantirta.audio import AudioExtraction, detect_audio_activity
 
-        aad_metadata: AudioExtraction = detect_audio_activity(self.audio_path)
+        aad_metadata: AudioExtraction = detect_audio_activity(self.vocal_path)
         self._audio_segments = aad_metadata.segments
 
         self.logger.debug(
@@ -485,7 +485,7 @@ class KaraokeTask:
         if self._audio_path is None or not self._audio_path.is_file():
             self.get_audio_path()
         return self._audio_path
-    
+
     @audio_path.setter
     def audio_path(self, path: str | Path):
         self.ensure_is_file(path)
