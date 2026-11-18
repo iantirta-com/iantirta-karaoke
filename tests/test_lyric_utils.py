@@ -3,7 +3,7 @@ import pytest
 from iantirta.audio import AudioSegment
 from iantirta.models import ASRResult, TextTiming, WordTiming
 
-from iantirta.karaoke.lyric_utils import timing_overlap, align2ref
+from iantirta.karaoke.lyric_utils import align2ref, timing_overlap
 
 
 @pytest.fixture
@@ -2339,6 +2339,7 @@ def test_compare_sequence_align(transcribe_res, indo_lyric):
     for op, a in zip(k_alignments.operations, alignments):
         _op = a.operation
         if _op == "equal": _op = "match"
+        if _op == "replace": _op = "subtitute/replace"
         assert op["op"] == _op, (
             f"{a.left} - {a.right}\n"
             f'{ref_tokens[op["ref_idx"]]} = {hyp_tokens[op["hyp_idx"]] if op["hyp_idx"] else "-"}'
@@ -2346,7 +2347,6 @@ def test_compare_sequence_align(transcribe_res, indo_lyric):
 
 
 def test_compare_align_lyric(transcribe_res, indo_lyric, audio_segments):
-    from pprint import pprint
 
     from kplus.pipelines.lyrics import align2ref as kplus_align2ref
 
@@ -2362,14 +2362,24 @@ def test_compare_align_lyric(transcribe_res, indo_lyric, audio_segments):
         raise_if_not_reliable=False
     )
 
+    import iantirta.text as text_utils
+
     for text, ktext in zip(ref_result.texts, kplus_ref_result.texts):
-        print(text.end, ktext.end)
-        assert text.text == ktext.text
+        assert text.end == ktext.end
+        assert text_utils.normalize(
+            text.text,
+            punctuation=True,
+        ) == text_utils.normalize(
+            ktext.text,
+            punctuation=True,
+        )
+    print(ref_result)
+    print(new_audio_segments)
 
 
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([
         '-v', '-s',
-        __file__ + "::test_compare_sequence_align"
+        __file__ + "::test_compare_align_lyric"
     ]))
